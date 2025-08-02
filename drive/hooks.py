@@ -1,9 +1,10 @@
 from . import __version__ as app_version
+from frappe import _
 
 app_name = "drive"
-app_title = "Frappe Drive"
-app_publisher = "Frappe Technologies Pvt. Ltd."
-app_description = "An easy to use, document sharing and management solution."
+app_title = _("Frappe Drive")
+app_publisher = _("Frappe Technologies Pvt. Ltd.")
+app_description = _("An easy to use, document sharing and management solution.")
 app_icon = "octicon octicon-file-directory"
 app_color = "grey"
 app_email = "developers@frappe.io"
@@ -17,7 +18,7 @@ add_to_apps_screen = [
     {
         "name": "drive",
         "logo": "/assets/drive/frontend/favicon-310x310.png",
-        "title": "Drive",
+        "title": _("Drive"),
         "route": "/drive",
     }
 ]
