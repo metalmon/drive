@@ -1,11 +1,18 @@
 <template>
   <LoadingIndicator
     v-if="loading"
-    class="w-10 h-full text-neutral-100 mx-auto"
+    class="w-10"
   />
-  <template v-else>
-    <img draggable="false" class="w-auto max-h-full" :src="previewURL" id-="" />
-  </template>
+  <div
+    class="max-w-4/5 max-h-[90%] overflow-auto items-center justify-center flex"
+  >
+    <img
+      v-show="!loading"
+      draggable="false"
+      class="self-center justify-center"
+      :src="previewURL"
+    />
+  </div>
 </template>
 
 <script setup>
@@ -14,10 +21,7 @@ import { onBeforeUnmount, onMounted, ref, watch, inject } from "vue"
 import { useObjectUrl } from "@vueuse/core"
 
 const props = defineProps({
-  previewEntity: {
-    type: Object,
-    default: null,
-  },
+  previewEntity: Object,
 })
 
 const loading = ref(true)
@@ -48,6 +52,7 @@ async function fetchContent() {
   if (res.ok) {
     imgBlob.value = await res.blob()
     loading.value = false
+    console.log("hii")
   }
 }
 

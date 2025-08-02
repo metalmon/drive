@@ -20,6 +20,7 @@ add_to_apps_screen = [
         "logo": "/assets/drive/frontend/favicon-310x310.png",
         "title": _("Drive"),
         "route": "/drive",
+        "has_permission": "drive.api.product.access_app",
     }
 ]
 
@@ -98,10 +99,10 @@ after_install = "drive.install.after_install"
 # -----------
 # Permissions evaluated in scripted ways
 
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
+permission_query_conditions = {
+    "Drive File": "drive.api.permissions.get_permission_query_conditions"
+}
+
 
 has_permission = {
     "Drive File": "drive.api.permissions.user_has_permission",
@@ -134,8 +135,8 @@ has_permission = {
 # ---------------
 
 scheduler_events = {
-    "daily": ["drive.api.files.auto_delete_from_trash"],
-    "daily": ["drive.api.permissions.auto_delete_expired_docshares"],
+    "daily": ["drive.api.files.auto_delete_from_trash", "drive.api.files.clear_deleted_files"],
+    "hourly": ["drive.api.permissions.auto_delete_expired_perms"],
 }
 
 # Testing

@@ -1,7 +1,9 @@
 <template>
   <button
-    class="flex h-7 w-full cursor-pointer items-center rounded text-gray-700 duration-300 ease-in-out focus:outline-none focus:transition-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-gray-400"
-    :class="isActive ? 'bg-white shadow-sm' : 'hover:bg-gray-100'"
+    class="flex h-7 w-full cursor-pointer items-center rounded text-ink-gray-7 duration-300 ease-in-out focus:outline-none focus:transition-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-outline-gray-3"
+    :class="
+      isActive ? ' bg-surface-selected shadow-sm' : 'hover:bg-surface-gray-2'
+    "
     @click="handleClick"
   >
     <div
@@ -9,20 +11,17 @@
     >
       <div class="flex items-center">
         <Tooltip
-          :text="label"
+          :text="__(label)"
           placement="right"
           arrow-class="fill-gray-900"
           :disabled="!isCollapsed"
         >
           <slot name="icon">
             <span class="grid h-4.5 w-4.5 flex-shrink-0 place-items-center">
-              <FeatherIcon
-                v-if="typeof icon == 'string'"
-                :name="icon"
-                class="h-4.5 w-4.5 text-gray-700"
+              <component
+                :is="icon"
+                class="size-4 text-ink-gray-7"
               />
-
-              <component :is="icon" v-else class="h-4.5 w-4.5 text-gray-700" />
             </span>
           </slot>
         </Tooltip>
@@ -34,7 +33,7 @@
               : 'ml-2 w-auto opacity-100',
           ]"
         >
-          {{ label }}
+          {{ __(label) }}
         </span>
       </div>
       <slot name="right" />
@@ -43,7 +42,7 @@
 </template>
 
 <script setup>
-import { Tooltip, FeatherIcon } from "frappe-ui"
+import { Tooltip } from "frappe-ui"
 import { computed } from "vue"
 import { useStore } from "vuex"
 import { useRouter } from "vue-router"
@@ -53,7 +52,7 @@ const store = useStore()
 
 const props = defineProps({
   icon: {
-    type: [String, Object],
+    type: [Function, Object],
     default: null,
   },
   label: {
@@ -76,6 +75,6 @@ function handleClick() {
 
 let isActive = computed(() => {
   const first = store.state.breadcrumbs[0]
-  return (first.name || first.label) === props.label
+  return first.label === props.label || first.name === props.label
 })
 </script>

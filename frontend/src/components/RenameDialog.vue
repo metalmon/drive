@@ -1,9 +1,13 @@
 <template>
-  <Dialog v-model="open" :options="{ title: 'Rename', size: 'xs' }">
+  <Dialog
+    v-model="open"
+    :options="{ title: 'Rename', size: 'xs' }"
+  >
     <template #body-content>
       <div class="flex items-center justify-center">
         <Input
           v-model="newName"
+          v-focus
           class="w-full"
           type="text"
           @keyup.enter="submit"
@@ -13,13 +17,19 @@
           :variant="'subtle'"
           theme="gray"
           size="sm"
-          class="form-input font-medium ml-2 text-gray-700 border-gray-100"
+          class="form-input font-medium ml-2 text-ink-gray-7 border-gray-100"
         >
           {{ entity.file_ext.toUpperCase().slice(1) }}
         </span>
       </div>
       <div class="flex mt-8">
-        <Button variant="solid" class="w-full" @click="submit"> Rename </Button>
+        <Button
+          variant="solid"
+          class="w-full"
+          @click="submit"
+        >
+          Rename
+        </Button>
       </div>
     </template>
   </Dialog>
@@ -59,19 +69,19 @@ const open = computed({
     return props.modelValue === "rn"
   },
   set: (value) => {
-    emit("update:modelValue", value)
+    emit("update:modelValue", value || "")
     if (!value) newName.value = ""
   },
 })
 
 const submit = () => {
-  emit("success", {
-    name: props.entity.name,
-    title: newName.value + (ext.value ? "." + ext.value : ""),
-  })
   rename.submit({
     entity_name: props.entity.name,
     new_title: newName.value + (ext.value ? "." + ext.value : ""),
+  })
+  emit("success", {
+    name: props.entity.name,
+    title: newName.value + (ext.value ? "." + ext.value : ""),
   })
 }
 </script>

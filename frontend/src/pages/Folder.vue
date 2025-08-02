@@ -2,20 +2,25 @@
   <GenericPage
     :verify="currentFolder"
     :get-entities="getFolderContents"
-    :icon="Folder"
+    :icon="LucideFolderClosed"
     :primary-message="'Folder is Empty'"
   />
 </template>
 
 <script setup>
-import Folder from "../components/EspressoIcons/Folder.vue"
 import GenericPage from "@/components/GenericPage.vue"
 import { inject, onMounted, onBeforeUnmount, watch, computed } from "vue"
 import { useStore } from "vuex"
 import { createResource } from "frappe-ui"
 import { COMMON_OPTIONS } from "@/resources/files"
-import { setBreadCrumbs, prettyData, setCache } from "@/utils/files"
+import {
+  setBreadCrumbs,
+  prettyData,
+  setCache,
+  updateURLSlug,
+} from "@/utils/files"
 import router from "@/router"
+import LucideFolderClosed from "~icons/lucide/folder-closed"
 
 const store = useStore()
 const realtime = inject("realtime")
@@ -24,15 +29,19 @@ const emitter = inject("emitter")
 const props = defineProps({
   entityName: String,
   team: String,
+  slug: String,
 })
+store.commit("setCurrentFolder", { name: props.entityName, team: props.team })
 
 const getFolderContents = createResource({
   ...COMMON_OPTIONS,
   url: "drive.api.list.files",
   makeParams: (params) => ({
+    ...params,
+    // Disable all checks, return all children
+    personal: -2,
     entity_name: props.entityName,
     team: props.team,
-    ...params,
   }),
   cache: ["folder", props.entityName],
 })
@@ -60,6 +69,7 @@ const onSuccess = (entity) => {
   setBreadCrumbs(entity.breadcrumbs, entity.is_private, () =>
     emitter.emit("rename")
   )
+  updateURLSlug(entity.title)
 }
 
 const e = computed(() => props.entityName)

@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router"
 import store from "./store"
-import { settings } from "./resources/permissions"
 import { manageBreadcrumbs } from "./utils/files"
+import { createResource } from "frappe-ui"
 
 function clearStore() {
   store.commit("setActiveEntity", null)
@@ -9,21 +9,12 @@ function clearStore() {
 
 async function setRootBreadCrumb(to) {
   if (store.getters.isLoggedIn) {
-    document.title = to.name
-    store.commit("setBreadcrumbs", [{ label: to.name, route: to.path }])
+    document.title = __(to.name)
+    if (to.name !== "Team")
+      store.commit("setBreadcrumbs", [
+        { label: __(to.name), name: to.name, route: to.path },
+      ])
   }
-  document
-    .querySelector(`head meta[property="og:title"]`)
-    .setAttribute("content", "Drive - " + to.name)
-  document
-    .querySelector(`head meta[name="twitter:title"]`)
-    .setAttribute("content", "Drive - " + to.name)
-  document
-    .querySelector(`head meta[property="og:image"]`)
-    .setAttribute("content", "")
-  document
-    .querySelector(`head meta[name="twitter:image"]`)
-    .setAttribute("content", "")
 }
 
 const routes = [
@@ -32,19 +23,18 @@ const routes = [
     component: () => null,
     beforeEnter: async () => {
       if (!store.getters.isLoggedIn) return "/login"
-      await settings.fetch()
+      const settings = createResource({
+        url: "/api/method/drive.api.product.get_settings",
+        method: "GET",
+        cache: "settings",
+      })
+      if (!settings.data) await settings.fetch()
       return settings.data.default_team
         ? "/t/" + settings.data.default_team
         : "/teams"
     },
   },
-  {
-    path: "/t/:team/notifications",
-    name: "Inbox",
-    // Load a skeleton template directly?
-    component: () => import("@/pages/Notifications.vue"),
-    beforeEnter: [setRootBreadCrumb],
-  },
+
   {
     path: "/:team/",
     redirect: (to) => ({
@@ -57,12 +47,21 @@ const routes = [
     name: "Home",
     component: () => import("@/pages/Personal.vue"),
     beforeEnter: [setRootBreadCrumb],
+    props: true,
+  },
+  {
+    path: "/t/:team/notifications",
+    name: "Inbox",
+    // Load a skeleton template directly?
+    component: () => import("@/pages/Notifications.vue"),
+    beforeEnter: [setRootBreadCrumb],
   },
   {
     path: "/t/:team/team",
     name: "Team",
     component: () => import("@/pages/Team.vue"),
     beforeEnter: [setRootBreadCrumb],
+    props: true,
   },
   {
     path: "/t/:team/recents",
@@ -83,7 +82,7 @@ const routes = [
     beforeEnter: [setRootBreadCrumb],
   },
   {
-    path: "/t/:team/file/:entityName",
+    path: "/t/:team/file/:entityName/:slug?",
     name: "File",
     component: () => import("@/pages/File.vue"),
     meta: { allowGuest: true, filePage: true },
@@ -91,7 +90,7 @@ const routes = [
     props: true,
   },
   {
-    path: "/t/:team/folder/:entityName",
+    path: "/t/:team/folder/:entityName/:slug?",
     name: "Folder",
     component: () => import("@/pages/Folder.vue"),
     meta: { allowGuest: true },
@@ -99,22 +98,22 @@ const routes = [
     props: true,
   },
   {
-    path: "/t/:team/document/:entityName",
+    path: "/t/:team/document/:entityName/:slug?",
     name: "Document",
     meta: { documentPage: true, allowGuest: true },
     component: () => import("@/pages/Document.vue"),
     props: true,
     beforeEnter: [manageBreadcrumbs],
   },
-  {
-    path: "/signup",
-    name: "Signup",
-    component: () => import("@/pages/LoginSignup.vue"),
-    beforeEnter: () => {
-      if (store.getters.isLoggedIn) return "/"
-    },
-    meta: { allowGuest: true },
-  },
+  // {
+  //   path: "/signup",
+  //   name: "Signup",
+  //   component: () => import("@/pages/LoginSignup.vue"),
+  //   beforeEnter: () => {
+  //     if (store.getters.isLoggedIn) return "/"
+  //   },
+  //   meta: { allowGuest: true },
+  // },
   {
     path: "/login",
     name: "Login",

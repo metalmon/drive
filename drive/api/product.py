@@ -3,9 +3,15 @@ from frappe.rate_limiter import rate_limit
 from frappe.utils import escape_html
 from frappe.utils import split_emails, validate_email_address
 from drive.api.permissions import is_admin
+from frappe.translate import get_all_translations
+from frappe import _
 
 
 CORPORATE_DOMAINS = ["gmail.com", "icloud.com", "frappemail.com"]
+
+
+def access_app():
+    return True
 
 
 @frappe.whitelist()
@@ -27,7 +33,7 @@ def create_personal_team(email=frappe.session.user, team_name=None):
             "team_domain": email.split("@")[-1] if team_name else "",
         }
     ).insert(ignore_permissions=True)
-    team.append("users", {"user": email, "is_admin": 1})
+    team.append("users", {"user": email, "access_level": 2})
     team.save()
     return team.name
 
@@ -66,7 +72,7 @@ def get_team_invites(team):
     return invites
 
 
-@frappe.whitelist(allow_guest=True)
+# @frappe.whitelist(allow_guest=True)
 def signup(account_request, first_name, last_name=None, team=None):
     account_request = frappe.get_doc("Account Request", account_request)
     if not account_request.login_count:
@@ -82,6 +88,7 @@ def signup(account_request, first_name, last_name=None, team=None):
             "user_type": "Website User",
         }
     )
+
     user.flags.no_welcome_mail = True
     user.flags.ignore_password_policy = True
     try:
@@ -91,6 +98,7 @@ def signup(account_request, first_name, last_name=None, team=None):
     account_request.signed_up = 1
 
     team = None
+
     if account_request.invite:
         invite = frappe.get_doc("Drive User Invitation", account_request.invite)
         invite.status = "Accepted"
@@ -110,17 +118,15 @@ def signup(account_request, first_name, last_name=None, team=None):
             "single_click": 1,
         }
     )
-    print(doc)
     doc.insert()
-
     # Check invites for this user
-    if not team:
-        # Create team for this user
-        domain = user.email.split("@")[-1]
-        if domain in CORPORATE_DOMAINS:
-            team = create_personal_team(user.email)
-        else:
-            return get_domain_teams(domain)
+    # if not team:
+    #     # Create team for this user
+    #     domain = user.email.split("@")[-1]
+    #     if domain in CORPORATE_DOMAINS:
+    #         team = create_personal_team(user.email)
+    #     else:
+    #         return get_domain_teams(domain)
 
     return {"location": "/drive/t/" + team}
 
@@ -207,14 +213,23 @@ def verify_otp(account_request, otp):
 def get_settings():
     if frappe.session.user == "Guest":
         return {}
-    return frappe.get_cached_doc("Drive Settings", frappe.session.user)
+    try:
+        return frappe.get_cached_doc("Drive Settings", frappe.session.user)
+    except:
+        return {}
 
 
 @frappe.whitelist()
 def set_settings(updates):
-    settings = frappe.get_doc("Drive Settings", frappe.session.user)
+    try:
+        settings = frappe.get_doc("Drive Settings", frappe.session.user)
+    except:
+        settings = frappe.get_doc({"doctype": "Drive Settings", "user": frappe.session.user})
+        settings.insert()
     if "single_click" in updates:
         settings.single_click = int(updates["single_click"])
+    if "auto_detect_links" in updates:
+        settings.auto_detect_links = int(updates["auto_detect_links"])
     if "default_team" in updates:
         settings.default_team = updates["default_team"]
     settings.save()
@@ -266,11 +281,11 @@ def invite_users(team, emails):
 
 
 @frappe.whitelist()
-def set_role(team, user_id, role):
+def set_user_access(team, user_id, access_level):
     if not is_admin(team):
         frappe.throw("You don't have the permissions for this action.")
     drive_team = {k.user: k for k in frappe.get_doc("Drive Team", team).users}
-    drive_team[user_id].is_admin = role
+    drive_team[user_id].access_level = access_level
     drive_team[user_id].save()
 
 
@@ -284,7 +299,7 @@ def remove_user(team, user_id):
 
 @frappe.whitelist()
 def get_all_users(team):
-    team_users = {k.user: k.is_admin for k in frappe.get_doc("Drive Team", team).users}
+    team_users = {k.user: k.access_level for k in frappe.get_doc("Drive Team", team).users}
     users = frappe.get_all(
         doctype="User",
         filters=[
@@ -298,7 +313,7 @@ def get_all_users(team):
         ],
     )
     for u in users:
-        u["role"] = "admin" if team_users[u["name"]] else "user"
+        u["access_level"] = team_users[u["name"]]
     return users
 
 
@@ -321,3 +336,15 @@ def reject_invite(key):
 
     invitation.status = "Expired"
     invitation.save(ignore_permissions=True)
+
+
+@frappe.whitelist(allow_guest=True)
+def get_translations():
+    if frappe.session.user != "Guest":
+        language = frappe.db.get_value("User", frappe.session.user, "language")
+        if not language:
+            language = frappe.db.get_single_value("System Settings", "language")
+    else:
+        language = frappe.db.get_single_value("System Settings", "language")
+
+    return get_all_translations(language)

@@ -1,8 +1,8 @@
 <template>
   <TransitionGroup
-    name="fade-in"
     v-for="(entity, i) in entities"
     :key="entity.name"
+    name="fade-in"
   >
     <UseDraggable
       v-if="entity.visible !== false"
@@ -10,44 +10,53 @@
       :initial-value="{ x: width - (i + 1) * 330, y: height - 500 }"
     >
       <div
-        class="w-[300px] bg-white/90 border border-gray-300 rounded-xl shadow-xl p-4 backdrop-blur-md z-30"
+        class="w-[300px] bg-surface-white/90 border border-outline-gray-2 rounded-xl shadow-xl p-4 backdrop-blur-md z-30"
       >
         <div class="cursor-move flex justify-between items-center mb-4">
           <div class="flex gap-2">
-            <h2 class="text-lg font-semibold">{{ entity.title }}</h2>
+            <h2 class="text-lg font-semibold text-ink-gray-8">
+              {{ entity.title }}
+            </h2>
           </div>
-          <Button @click="entity.visible = false" class="bg-white">
-            <LucideX class="w-4 w-5" />
+          <Button
+            variant="ghost"
+            @click="entity.visible = false"
+          >
+            <template #icon>
+              <LucideX class="size-4" />
+            </template>
           </Button>
         </div>
-        <ul class="space-y-3 text-sm pb-2">
+        <ul class="space-y-3 text-sm pb-2 text-ink-gray-5">
           <li>
-            <span class="inline-block w-24 text-gray-600">Owned by: </span>
+            <span class="inline-block w-24 text-ink-gray-5"
+              >{{ __("Owner") }}:
+            </span>
             <span class="col-span-1"
               ><a href="mailto:{{ entity.owner }}">{{ entity.owner }}</a>
             </span>
           </li>
 
           <li>
-            <span class="inline-block w-24 text-gray-600">Type:</span>
-            <span class="col-span-1">{{ getEntityType(entity) }}</span>
+            <span class="inline-block w-24">{{ __("Type") }}:</span>
+            <span class="col-span-1">{{ entity.file_type }}</span>
           </li>
           <li v-if="entity.file_size">
-            <span class="inline-block w-24 text-gray-600">Size:</span>
+            <span class="inline-block w-24">{{ __("Size") }}:</span>
             <span class="col-span-1">
               {{ entity.file_size_pretty }}{{ ` (${entity.file_size})` }}</span
             >
           </li>
           <li>
-            <span class="inline-block w-24 text-gray-600">Modified:</span>
+            <span class="inline-block w-24">{{ __("Modified") }}:</span>
             <span class="col-span-1">{{ formatDate(entity.modified) }}</span>
           </li>
           <li>
-            <span class="inline-block w-24 text-gray-600">Added:</span>
+            <span class="inline-block w-24">{{ __("Added") }}:</span>
             <span class="col-span-1">{{ formatDate(entity.creation) }}</span>
           </li>
           <!-- <li>
-            <span class="inline-block w-24 text-gray-600">Path:</span>
+            <span class="inline-block w-24">Path:</span>
             <span class="col-span-1">{{ entity.path }}</span>
           </li> -->
         </ul>
@@ -60,16 +69,24 @@
             class="rounded flex justify-center items-center scale-[90%]"
             @click="emitter.emit('showShareDialog')"
           >
-            Manage
+            {{ __("Manage") }}
           </Button>
         </div>
 
-        <div v-if="!access[i]" class="text-sm text-center italic">
+        <div
+          v-if="!access[i]"
+          class="text-sm text-center italic"
+        >
           Loading...
         </div>
-        <ul v-else class="space-y-3 text-sm py-2">
+        <ul
+          v-else
+          class="space-y-3 text-sm py-2"
+        >
           <li class="flex">
-            <span class="inline-block w-24 text-gray-600">General:</span>
+            <span class="inline-block w-24 text-ink-gray-5"
+              >{{ __("General") }}:</span
+            >
             <div class="col-span-1 flex gap-2">
               <GeneralAccess
                 size="sm"
@@ -88,15 +105,17 @@
             </div>
           </li>
           <li>
-            <span class="inline-block w-24 text-gray-600">Shared with:</span>
+            <span class="inline-block w-24 text-ink-gray-5"
+              >{{ __("Shared") }}:</span
+            >
             <span class="col-span-1">
               {{}}
               {{
                 access[i].users.message.length
-                  ? access[i].users.message.length +
+                  ? access[i].users.message.length + ' ' +
                     (access[i].users.message.length === 1
-                      ? " person"
-                      : " people")
+                      ? __("person")
+                      : __("people"))
                   : "-"
               }}
               {{
@@ -116,8 +135,7 @@
 </template>
 
 <script setup>
-import { formatMimeType, formatDate } from "@/utils/format"
-import Info from "./EspressoIcons/Info.vue"
+import { formatDate } from "@/utils/format"
 
 import { UseDraggable } from "@vueuse/components"
 import { Button } from "frappe-ui"
@@ -126,11 +144,6 @@ import { computedAsync } from "@vueuse/core"
 const props = defineProps({
   entities: Array,
 })
-
-const getEntityType = (entity) => {
-  if (entity.is_group) return "Folder"
-  return formatMimeType(entity.mime_type, false)
-}
 
 const height = document.body.clientHeight
 const width = document.body.clientWidth
@@ -144,7 +157,6 @@ const access = computedAsync(async () => {
       "/api/method/drive.api.permissions.get_user_access?user=Guest&entity=" +
         p.name
     )
-    console.log()
     res.push({
       users: await users.json(),
       general: await general.json(),

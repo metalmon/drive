@@ -1,13 +1,13 @@
 <template>
   <LoadingIndicator
     v-show="loading"
-    class="w-10 h-full text-neutral-100 mx-auto"
+    class="w-10"
   />
   <video
     v-show="!loading"
     :key="src"
     ref="mediaRef"
-    class="w-auto max-h-full"
+    class="h-fit"
     autoplay
     muted
     preload="none"
@@ -16,7 +16,10 @@
     draggable="false"
     @loadedmetadata="handleMediaReady"
   >
-    <source :src="src" :type="type" />
+    <source
+      :src="src"
+      :type="type"
+    />
   </video>
 </template>
 
@@ -32,10 +35,7 @@ import { LoadingIndicator } from "frappe-ui"
 import { ref, onBeforeUnmount, watch } from "vue"
 
 const props = defineProps({
-  previewEntity: {
-    type: String,
-    default: "",
-  },
+  previewEntity: Object,
 })
 const loading = ref(true)
 const src = ref(

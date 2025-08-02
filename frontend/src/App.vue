@@ -1,31 +1,50 @@
 <template>
-  <div class="w-screen h-screen antialiased">
-    <div class="bg-black text-white text-sm text-center py-2 sm:hidden">
+  <div
+    class="w-screen h-screen antialiased"
+    dark
+  >
+    <div
+      class="bg-surface-gray-7 text-ink-white text-sm text-center py-2 sm:hidden"
+    >
       Drive works best on desktop.
     </div>
-    <div v-if="isLoggedIn || $route.meta.allowGuest" class="flex">
+    <div
+      v-if="isLoggedIn || $route.meta.allowGuest"
+      class="flex"
+    >
       <Sidebar
         v-if="isLoggedIn && !['Teams', 'Setup'].includes($route.name)"
         class="hidden sm:block"
       />
       <div
         id="dropzone"
-        class="flex flex-col h-screen flex-grow overflow-hidden"
+        class="flex flex-col h-screen flex-grow overflow-hidden bg-surface-white"
       >
-        <router-view :key="$route.fullPath" v-slot="{ Component }">
+        <router-view
+          :key="$route.fullPath"
+          v-slot="{ Component }"
+        >
           <component :is="Component" />
         </router-view>
       </div>
 
-      <InfoSidebar v-if="$route.name === 'File'" />
-
-      <BottomBar v-if="isLoggedIn" class="fixed bottom-0 w-full sm:hidden" />
+      <BottomBar
+        v-if="isLoggedIn"
+        class="fixed bottom-0 w-full sm:hidden"
+      />
     </div>
-    <router-view v-else :key="$route.fullPath" v-slot="{ Component }">
+    <router-view
+      v-else
+      :key="$route.fullPath"
+      v-slot="{ Component }"
+    >
       <component :is="Component" />
     </router-view>
   </div>
-  <SearchPopup v-if="isLoggedIn && showSearchPopup" v-model="showSearchPopup" />
+  <SearchPopup
+    v-if="isLoggedIn && showSearchPopup"
+    v-model="showSearchPopup"
+  />
   <Transition
     enter-active-class="transition duration-[150ms] ease-[cubic-bezier(.21,1.02,.73,1)]"
     enter-from-class="translate-y-1 opacity-0"
@@ -40,14 +59,14 @@
 </template>
 <script setup>
 import Sidebar from "@/components/Sidebar.vue"
-import InfoSidebar from "@/components/InfoSidebar.vue"
 import UploadTracker from "@/components/UploadTracker.vue"
 import { Toasts } from "@/utils/toasts.js"
 import SearchPopup from "./components/SearchPopup.vue"
 import BottomBar from "./components/BottomBar.vue"
 import { useStore } from "vuex"
-import { onMounted, ref, computed } from "vue"
-import { useRouter, useRoute } from "vue-router"
+import { ref, computed } from "vue"
+import { useRouter } from "vue-router"
+import { onKeyDown } from "@vueuse/core"
 import emitter from "@/emitter"
 
 const store = useStore()
@@ -62,56 +81,58 @@ emitter.on("showSearchPopup", (data) => {
   showSearchPopup.value = data
 })
 
-function addKeyboardShortcuts() {
-  let tapped
-  window.addEventListener("keydown", (e) => {
-    let params = { team: localStorage.getItem("recentTeam") }
-    const DOUBLE_KEY_MAPS = {
-      k: () => setTimeout(() => (showSearchPopup.value = true), 15), // band aid fix as k was showing up in search
-      h: () => router.push({ name: "Home", params }),
-      n: () => router.push({ name: "Inbox", params }),
-      t: () => router.push({ name: "Team", params }),
-      f: () => router.push({ name: "Favourites", params }),
-      r: () => router.push({ name: "Recents", params }),
-      s: () => router.push({ name: "Shared" }),
-    }
-
-    const KEY_MAPS = [
-      [
-        (e) => e.metaKey && e.shiftKey && e.key == "ArrowRight",
-        () => this.$store.commit("setIsSidebarExpanded", true),
-      ],
-      [
-        (e) => e.metaKey && e.shiftKey && e.key == "ArrowLeft",
-        () => this.$store.commit("setIsSidebarExpanded", false),
-      ],
-      [(e) => e.metaKey && e.key == "k", () => (showSearchPopup.value = true)],
-    ]
-    if (
-      e.target.classList.contains("ProseMirror") ||
-      e.target.tagName === "INPUT" ||
-      e.target.tagName === "TEXTAREA"
-    )
-      return
-
-    for (const key in DOUBLE_KEY_MAPS) {
-      if (e.key === key) {
-        if (tapped === key) {
-          DOUBLE_KEY_MAPS[key]()
-          tapped = null
-        } else {
-          tapped = key
-          setTimeout(() => (tapped = null), 500)
-        }
-      }
-    }
-    for (let [keys, action] of KEY_MAPS) {
-      if (keys(e)) {
-        action()
-        document.activeElement.blur()
-      }
+// Add keyboard shortcuts
+const KEY_BINDS = {
+  k: () => (showSearchPopup.value = true),
+  h: () => router.push({ name: "Home" }),
+  i: () => router.push({ name: "Inbox" }),
+  t: () => router.push({ name: "Team" }),
+  f: () => router.push({ name: "Favourites" }),
+  r: () => router.push({ name: "Recents" }),
+  s: () => router.push({ name: "Shared" }),
+  u: () => emitter.emit("uploadFile"),
+  U: () => emitter.emit("uploadFolder"),
+  u: () => emitter.emit("uploadFile"),
+  N: () => emitter.emit("newFolder"),
+  m: () => store.state.activeEntity && emitter.emit("move"),
+  Enter: () => store.state.activeEntity && emitter.emit("rename"),
+}
+for (let k in KEY_BINDS) {
+  onKeyDown(k, (e) => {
+    if (e.ctrlKey) {
+      KEY_BINDS[k](e)
+      e.preventDefault()
     }
   })
 }
-onMounted(addKeyboardShortcuts)
+
+onKeyDown((e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  if (e.key == "?") emitter.emit("toggleShortcuts")
+  if (e.metaKey) {
+    if (e.key == ",") {
+      emitter.emit("showSettings")
+      e.preventDefault()
+    }
+    if (e.shiftKey) {
+      if (e.key == "ArrowRight") {
+        store.commit("setIsSidebarExpanded", true)
+        e.preventDefault()
+      } else if (e.key == "ArrowLeft") {
+        store.commit("setIsSidebarExpanded", false)
+        e.preventDefault()
+      }
+    }
+    // Support Cmd + K also
+    if (e.key == "k") {
+      showSearchPopup.value = true
+      e.preventDefault()
+    }
+  }
+})
 </script>

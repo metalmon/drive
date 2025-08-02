@@ -1,9 +1,11 @@
 import { createResource } from "frappe-ui"
 import { toast } from "@/utils/toasts"
+import { openEntity, setTitle } from "@/utils/files"
 
 import store from "@/store"
 import router from "@/router"
 import { prettyData, setCache } from "@/utils/files"
+import { updateURLSlug } from "@/utils/files"
 
 // GETTERS
 export const COMMON_OPTIONS = {
@@ -27,7 +29,10 @@ export const getHome = createResource({
   ...COMMON_OPTIONS,
   url: "drive.api.list.files",
   makeParams: (params) => {
-    return { ...params, personal: 0 }
+    return {
+      ...params,
+      personal: 0,
+    }
   },
   cache: "home-folder-contents",
 })
@@ -87,7 +92,13 @@ export const getTrash = createResource({
 })
 
 // SETTERS
-const LISTS = [getPersonal, getHome, getRecents, getShared, getFavourites]
+export const LISTS = [
+  getPersonal,
+  getHome,
+  getRecents,
+  getShared,
+  getFavourites,
+]
 export const mutate = (entities, func) => {
   LISTS.forEach((l) =>
     l.setData((d) => {
@@ -101,6 +112,30 @@ export const mutate = (entities, func) => {
       return d
     })
   )
+}
+
+export const updateMoved = (new_parent, team) => {
+  if (new_parent && team) {
+    // All details are repetetively provided (check Folder.vue) because if this is run first
+    // No further mutation of the resource object can take place
+    createResource({
+      ...COMMON_OPTIONS,
+      url: "drive.api.list.files",
+      makeParams: (params) => ({
+        ...params,
+        entity_name: new_parent,
+        personal: -2,
+        team,
+      }),
+      cache: ["folder", new_parent],
+    }).fetch({
+      order_by:
+        store.state.sortOrder.field +
+        (store.state.sortOrder.ascending ? " 1" : " 0"),
+    })
+  } else {
+    ;(move.params.is_private ? getPersonal : getHome).fetch({ team })
+  }
 }
 
 export const toggleFav = createResource({
@@ -149,10 +184,12 @@ export const clearRecent = createResource({
       entity_names,
     }
   },
-  onSuccess: () =>
-    getRecents.previousData > 1
-      ? toast(`Cleared  ${getRecents.previousData.length} files from Recents`)
-      : null,
+  onSuccess: () => {
+    const files = clearRecent.params.entity_names?.length
+    toast(
+      `Removed  ${files || "all"} file${files === 1 ? "" : "s"} from Recents.`
+    )
+  },
 })
 
 export const clearTrash = createResource({
@@ -164,12 +201,13 @@ export const clearTrash = createResource({
     }
     return { entity_names: data.entities.map((e) => e.name) }
   },
-  onSuccess: () =>
+  onSuccess: () => {
+    // Buggy for some reason
+    const files = clearTrash.params.entity_names?.length
     toast(
-      `Permanently deleted  ${clearRecent.params.entities} file${
-        clearRecent.params.entities === 1 ? "" : "s"
-      }.`
-    ),
+      `Permanently deleted ${files || "all"} file${files === 1 ? "" : "s"}.`
+    )
+  },
 })
 
 export const rename = createResource({
@@ -180,6 +218,14 @@ export const rename = createResource({
       method: "rename",
       ...data,
     }
+  },
+  onSuccess: () => {
+    let l = store.state.breadcrumbs[store.state.breadcrumbs.length - 1]
+    if (l.name === rename.params.entity_name) {
+      l.label = rename.params.new_title
+      setTitle(rename.params.new_title)
+    }
+    updateURLSlug(rename.params.new_title)
   },
   onError(error) {
     toast({
@@ -214,6 +260,54 @@ export const togglePersonal = createResource({
       return data
     })
   },
+})
+
+export const move = createResource({
+  url: "drive.api.files.move",
+  onSuccess(data) {
+    toast({
+      title: "Moved to " + data.title,
+      buttons: [
+        {
+          label: "Go",
+          action: () => {
+            openEntity(null, {
+              name: data.name,
+              team: data.team,
+              is_group: true,
+              is_private: data.is_private,
+            })
+          },
+        },
+      ],
+    })
+
+    // Update moved-into folder
+    updateMoved(data.name, data.team, data.is_private)
+  },
+  onError() {
+    toast("There was an error.")
+  },
+})
+
+export const allFolders = createResource({
+  method: "GET",
+  url: "drive.api.list.files",
+  cache: "all-folders",
+  makeParams: (params) => ({
+    ...params,
+    is_active: 1,
+    folders: 1,
+    personal: -1,
+    only_parent: 0,
+  }),
+  transform: (d) =>
+    d.map((k) => ({
+      value: k.name,
+      label: k.title,
+      parent: k.parent_entity,
+      is_private: k.is_private,
+    })),
 })
 
 export const translate = createResource({

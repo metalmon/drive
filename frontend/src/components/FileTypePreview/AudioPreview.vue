@@ -1,20 +1,23 @@
 <template>
   <LoadingIndicator
-    v-show="loading"
-    class="w-10 h-full text-neutral-100 mx-auto"
+    v-if="loading"
+    class="w-10"
   />
   <audio
-    v-show="!loading"
+    v-else
     :key="src"
     ref="mediaRef"
-    class="w-1/4 max-h-full"
+    class="w-1/4 h-full"
     autoplay
     preload="none"
     controls="true"
     controlslist="nodownload noremoteplayback noplaybackrate"
     @loadedmetadata="handleMediaReady"
   >
-    <source :src="src" :type="type" />
+    <source
+      :src="src"
+      :type="type"
+    />
   </audio>
 </template>
 

@@ -1,43 +1,53 @@
 <template>
-  <Popover placement="right-start" class="flex w-full">
+  <Popover
+    placement="right-start"
+    class="flex w-full"
+  >
     <template #target="{ togglePopover }">
-      <button
+      <Button
+        @click="togglePopover"
+        class="w-full !justify-start px-2"
         :class="[
-          active ? 'bg-gray-100' : 'text-gray-800',
-          'group w-full flex h-7 items-center justify-between rounded px-2 text-base hover:bg-gray-100',
+          active ? 'bg-surface-gray-2' : 'text-ink-gray-8',
+          'group w-full flex h-7 items-center justify-between rounded px-2 text-base hover:bg-surface-gray-2',
         ]"
-        @click.prevent="togglePopover()"
+        variant="ghost"
       >
-        <div class="flex gap-2">
-          <AppsIcon class="size-4" />
-          <span class="whitespace-nowrap"> Apps </span>
-        </div>
-        <FeatherIcon name="chevron-right" class="size-4 text-ink-gray-6" />
-      </button>
+        <template #icon>
+          <AppsIcon class="size-4 text-ink-gray-6" />
+          <span class="whitespace-nowrap text-base">Apps </span>
+        </template>
+
+        <template #suffix>
+          <LucideChevronRight class="size-4 text-ink-gray-6 ml-auto" />
+        </template>
+      </Button>
     </template>
     <template #body>
       <div
-        class="grid grid-cols-3 justify-between mx-3 p-2 rounded-lg border border-gray-100 bg-white shadow-xl"
+        class="flex w-full flex-col rounded-lg border border-outline-gray-2 bg-surface-white p-1.5 text-sm text-ink-gray-8 shadow-xl auto-fill-[100px] dark:bg-surface-gray-1"
       >
-        <div v-for="app in apps.data" :key="app.name">
-          <a
-            :href="app.route"
-            class="flex flex-col gap-1.5 rounded justify-center items-center py-2 px-1 hover:bg-gray-100"
-          >
-            <img class="size-8" :src="app.logo" />
-            <div class="text-sm text-gray-700" @click="app.onClick">
-              {{ app.title }}
-            </div>
-          </a>
-        </div>
+        <a
+          :href="app.route"
+          v-for="app in apps.data"
+          key="name"
+          class="flex items-center gap-2 rounded p-1 hover:bg-surface-gray-2"
+        >
+          <img
+            class="size-6"
+            :src="app.logo"
+          />
+          <span class="max-w-18 text-sm w-full truncate">
+            {{ app.title }}
+          </span>
+        </a>
       </div>
     </template>
   </Popover>
 </template>
 <script setup>
-import AppsIcon from "@/components/EspressoIcons/Apps.vue"
-import { Popover, createResource } from "frappe-ui"
-import { FeatherIcon } from "frappe-ui"
+import AppsIcon from "@/components/AppsIcon.vue"
+import { Popover, createResource, Button } from "frappe-ui"
 
 const props = defineProps({
   active: Boolean,

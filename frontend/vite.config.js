@@ -37,10 +37,25 @@ export default defineConfig({
   },
   server: {
     allowedHosts: ["drive.localhost"],
+    fs: {
+      allow: [".."],
+    },
   },
-
+  ssr: {
+    external: { html2canvas: "html2canvas", dompurify: "dompurify" },
+  },
   optimizeDeps: {
     esbuildOptions: { target: "esnext" },
-    include: ["feather-icons", "showdown", "tailwind.config.js"],
+    include: [
+      "lucide-static",
+      "feather-icons",
+      "tailwind.config.js",
+      "lowlight",
+      "grid-layout-plus",
+      "prosemirror-state",
+      "prosemirror-transform",
+      "prosemirror-model",
+      "prosemirror-view",
+    ],
   },
 })

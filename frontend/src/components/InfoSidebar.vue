@@ -1,31 +1,32 @@
 <template>
   <div
     v-if="entity && store.state.showInfo"
-    class="transition-all duration-200 ease-in-out h-full border-l sm:min-w-[352px] sm:max-w-[352px] min-w-full"
+    class="transition-all duration-200 ease-in-out h-full border-l sm:min-w-[352px] sm:max-w-[452px] shrink-0 whitespace-nowrap"
   >
     <div>
       <!-- Information -->
-      <div v-if="tab === 0" class="h-full border-b px-5 pt-4 pb-5 w-full">
+      <div
+        v-if="tab === 0"
+        class="h-full border-b px-5 pt-4 pb-5 w-full"
+      >
         <span
-          class="inline-flex items-center gap-2.5 mb-5 text-gray-800 font-medium text-lg w-full"
+          class="inline-flex items-center gap-2.5 mb-5 text-ink-gray-8 font-medium text-lg w-full"
         >
-          <!-- <Info /> -->
-          Information
+          {{ __("Information") }}
         </span>
         <div
-          v-if="
-            entity.mime_type?.startsWith('video') ||
-            (entity.mime_type?.startsWith('image') &&
-              entity?.mime_type !== 'image/svg+xml')
-          "
+          v-if="thumbnailUrl[2]"
           class="h-[210px] w-full mb-4"
         >
-          <img class="object-contain h-full mx-auto" :src="thumbnailLink" />
+          <img
+            class="object-contain h-full mx-auto"
+            :src="thumbnailUrl[0] || thumbnailUrl[1]"
+          />
         </div>
         <div class="space-y-6.5">
           <div v-if="entity.owner === $store.state.user.id">
             <div class="text-base font-medium mb-4">Access</div>
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between text-ink-gray-6">
               <div class="flex">
                 <GeneralAccess
                   size="md"
@@ -47,8 +48,8 @@
                     class="-mr-[3px] outline outline-white"
                   />
                   <span
-                    class="text-base text-gray-700 ms-1"
                     v-if="userList.data.slice(3).length"
+                    class="text-base text-ink-gray-7 ms-1"
                   >
                     +{{ userList.data.slice(3).length }}
                   </span>
@@ -60,32 +61,58 @@
                 class="rounded flex justify-center items-center"
                 @click="emitter.emit('showShareDialog')"
               >
-                Manage
+                {{ __("Manage") }}
               </Button>
             </div>
           </div>
           <div v-if="userId !== 'Guest'">
-            <div class="text-base font-medium mb-4">Tags</div>
-            <TagInput class="min-w-full" :entity="entity" />
+            <div class="text-base font-medium mb-4 text-ink-gray-8">
+              {{ __("Tags") }}
+            </div>
+            <TagInput
+              class="min-w-full"
+              :entity="entity"
+            />
           </div>
           <div>
-            <div class="text-base font-medium mb-4">Properties</div>
+            <div class="text-base font-medium mb-4 text-ink-gray-8">
+              {{ __("Properties") }}
+            </div>
             <div class="text-base grid grid-flow-row grid-cols-2 gap-y-3">
-              <span class="col-span-1 text-gray-600">Type</span>
-              <span class="col-span-1">{{ formattedMimeType }}</span>
-              <span v-if="entity.file_size" class="col-span-1 text-gray-600">
-                Size
+              <span class="col-span-1 text-ink-gray-5">{{ __("Type") }}</span>
+              <span
+                class="col-span-1 text-ink-gray-8"
+                :title="entity.mime_type"
+              >
+                {{ entity.file_type }}
               </span>
-              <span v-if="entity.file_size" class="col-span-1">
+              <span
+                v-if="entity.file_size"
+                class="col-span-1 text-ink-gray-5"
+              >
+                {{ __("Size") }}
+              </span>
+              <span
+                v-if="entity.file_size"
+                class="col-span-1 text-ink-gray-8"
+              >
                 {{ entity.file_size_pretty }}
                 {{ `(${entity.file_size})` }}
               </span>
-              <span class="col-span-1 text-gray-600">Modified</span>
-              <span class="col-span-1">{{ formatDate(entity.modified) }}</span>
-              <span class="col-span-1 text-gray-600">Uploaded</span>
-              <span class="col-span-1">{{ formatDate(entity.creation) }}</span>
-              <span class="col-span-1 text-gray-600">Owner</span>
-              <span class="col-span-1">{{
+              <span class="col-span-1 text-ink-gray-5">{{
+                __("Modified")
+              }}</span>
+              <span class="col-span-1 text-ink-gray-8">{{
+                formatDate(entity.modified)
+              }}</span>
+              <span class="col-span-1 text-ink-gray-5">{{
+                __("Uploaded")
+              }}</span>
+              <span class="col-span-1 text-ink-gray-8">{{
+                formatDate(entity.creation)
+              }}</span>
+              <span class="col-span-1 text-ink-gray-5">{{ __("Owner") }}</span>
+              <span class="col-span-1 text-ink-gray-8">{{
                 entity.owner +
                 (entity.owner === $store.state.user.id ? " (you)" : "")
               }}</span>
@@ -99,10 +126,9 @@
         class="max-h-[90vh] pt-4 pb-5 border-b overflow-y-auto overflow-x-hidden"
       >
         <span
-          class="inline-flex items-center gap-2.5 px-5 mb-5 text-gray-800 font-medium text-lg w-full"
+          class="inline-flex items-center gap-2.5 px-5 mb-5 text-ink-gray-8 font-medium text-lg w-full"
         >
-          <!--  <Comment /> -->
-          Comments
+          {{ __("Comments") }}
         </span>
         <!-- Check commenting permissions -->
         <div class="pb-2 px-5">
@@ -118,13 +144,16 @@
                 size="md"
               />
               <div class="ml-3">
-                <div class="flex items-center justify-start text-base gap-x-1">
-                  <span class="font-medium">{{ comment.comment_by }}</span>
-                  <span>{{ "∙" }}</span>
-                  <span class="text-gray-600">{{ comment.creation }}</span>
+                <div
+                  class="flex items-center justify-start text-base gap-x-1 text-ink-gray-5"
+                >
+                  <span class="font-medium text-ink-gray-8">{{
+                    comment.comment_by
+                  }}</span>
+                  <span>∙ {{ comment.creation }}</span>
                 </div>
                 <span
-                  class="my-2 text-base text-gray-700 break-word leading-snug"
+                  class="my-2 text-base text-ink-gray-7 break-word leading-snug"
                 >
                   {{ comment.content }}
                 </span>
@@ -132,9 +161,13 @@
             </div>
           </div>
           <div class="flex items-center justify-start py-2">
-            <Avatar :label="fullName" :image="imageURL" class="mr-3" />
+            <Avatar
+              :label="fullName"
+              :image="imageURL"
+              class="mr-3"
+            />
             <div
-              class="flex items-center border w-full bg-transparent rounded mr-1 focus-within:ring-2 ring-gray-400 hover:bg-gray-100 focus-within:bg-gray-100 group"
+              class="flex items-center border w-full bg-transparent rounded mr-1 focus-within:ring-2 ring-outline-gray-3 hover:bg-surface-gray-2 focus-within:bg-surface-gray-2 group"
             >
               <textarea
                 v-model="newComment"
@@ -149,7 +182,7 @@
                 icon="arrow-up-circle"
                 :disabled="!newComment.length"
                 @click="postComment"
-              ></Button>
+              />
             </div>
           </div>
         </div>
@@ -159,43 +192,58 @@
         class="max-h-[90vh] pt-4 pb-5 border-b overflow-y-auto overflow-x-hidden"
       >
         <span
-          class="inline-flex items-center gap-2.5 px-5 mb-5 text-gray-800 font-medium text-lg w-full"
+          class="inline-flex items-center gap-2.5 px-5 mb-5 text-ink-gray-8 font-medium text-lg w-full"
         >
-          Activity
+          {{ __("Activity") }}
         </span>
-        <ActivityTree v-if="entity.write" :entity="entity" />
+        <ActivityTree
+          v-if="entity.write"
+          :entity="entity"
+        />
       </div>
     </div>
   </div>
 
   <div
-    class="hidden sm:flex flex-col items-center overflow-hidden h-full min-w-[48px] gap-1 pt-3 px-0 border-l z-0 bg-white"
+    class="hidden sm:flex flex-col items-center overflow-hidden h-full min-w-[48px] gap-1 pt-3 px-0 border-l z-0 bg-surface-white"
   >
     <Button
-      class="text-gray-600"
-      :class="[tab === 0 ? 'text-black bg-gray-200' : ' hover:bg-gray-50']"
+      class="text-ink-gray-5"
+      :class="[
+        tab === 0
+          ? 'text-black bg-surface-gray-3'
+          : ' hover:bg-surface-menu-bar',
+      ]"
       variant="minimal"
       @click="switchTab(0)"
     >
-      <Info />
+      <LucideInfo class="size-4 text-ink-gray-6" />
     </Button>
     <Button
       v-if="entity?.comment"
-      class="text-gray-600"
-      :class="[tab === 1 ? 'text-black bg-gray-200' : ' hover:bg-gray-50']"
+      class="text-ink-gray-5"
+      :class="[
+        tab === 1
+          ? 'text-black bg-surface-gray-3'
+          : ' hover:bg-surface-menu-bar',
+      ]"
       variant="minimal"
       @click="switchTab(1)"
     >
-      <Comment />
+      <LucideMessageCircle class="size-4 text-ink-gray-6" />
     </Button>
     <Button
       v-if="entity?.write"
-      class="text-gray-600"
-      :class="[tab === 2 ? 'text-black bg-gray-200' : ' hover:bg-gray-50']"
+      class="text-ink-gray-5"
+      :class="[
+        tab === 2
+          ? 'text-black bg-surface-gray-3'
+          : ' hover:bg-surface-menu-bar',
+      ]"
       variant="minimal"
       @click="switchTab(2)"
     >
-      <Clock />
+      <LucideClock class="size-4 text-ink-gray-6" />
     </Button>
   </div>
 </template>
@@ -204,33 +252,26 @@
 import { ref, computed, watch } from "vue"
 import { useStore } from "vuex"
 import { Avatar, call, createResource } from "frappe-ui"
-import { formatMimeType, formatDate } from "@/utils/format"
+import { formatDate } from "@/utils/format"
 import GeneralAccess from "@/components/GeneralAccess.vue"
-import { thumbnail_getIconUrl } from "@/utils/getIconUrl"
-import Info from "./EspressoIcons/Info.vue"
-import File from "./EspressoIcons/File.vue"
-import Comment from "./EspressoIcons/Comment.vue"
-import Clock from "./EspressoIcons/Clock.vue"
+import { getThumbnailUrl } from "@/utils/getIconUrl"
 import ActivityTree from "./ActivityTree.vue"
 import TagInput from "@/components/TagInput.vue"
 import { generalAccess, userList } from "@/resources/permissions"
+import LucideMessageCircle from "~icons/lucide/message-circle"
 
 const store = useStore()
 const tab = ref(0)
 const newComment = ref("")
-const thumbnailLink = ref("")
 
 const userId = computed(() => store.state.user.id)
 const fullName = computed(() => store.state.user.fullName)
 const imageURL = computed(() => store.state.user.imageURL)
-
-const formattedMimeType = computed(() => {
-  if (entity.value.is_group) return "Folder"
-  const kind = formatMimeType(entity.value.mime_type)
-  return kind.charAt(0).toUpperCase() + kind.slice(1)
-})
-
 const entity = computed(() => store.state.activeEntity)
+const thumbnailUrl = computed(() => {
+  const res = getThumbnailUrl(entity.value?.name, entity.value?.file_type)
+  return res
+})
 
 function switchTab(val) {
   if (store.state.showInfo == false) {
@@ -241,15 +282,6 @@ function switchTab(val) {
   } else {
     tab.value = val
   }
-}
-
-async function thumbnailUrl() {
-  let result = await thumbnail_getIconUrl(
-    formatMimeType(entity.value.mime_type),
-    entity.value.name,
-    entity.value.file_ext
-  )
-  thumbnailLink.value = result
 }
 
 watch(entity, (newEntity) => {
@@ -263,7 +295,6 @@ watch(entity, (newEntity) => {
       (!newEntity.comment && tab.value === 1)
     )
       tab.value = 0
-    thumbnailUrl()
     comments.fetch({ entity_name: newEntity.name })
     generalAccess.fetch({ entity: newEntity.name })
     userList.fetch({ entity: newEntity.name })

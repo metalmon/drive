@@ -1,29 +1,34 @@
 <template>
-  <Popover placement="right-start" class="flex w-full">
+  <Popover
+    placement="right-start"
+    class="flex w-full"
+  >
     <template #target="{ togglePopover }">
-      <button
-        :class="[
-          active ? 'bg-gray-100' : 'text-gray-800',
-          'group w-full flex h-7 items-center justify-between rounded px-2 text-base hover:bg-gray-100',
-        ]"
-        @click.prevent="togglePopover()"
+      <Button
+        @click="togglePopover"
+        class="w-full px-2 flex justify-between h-7 items-center"
+        variant="ghost"
       >
-        <div class="flex gap-2">
-          <FeatherIcon name="user" class="size-4 text-ink-gray-6" />
-          <span class="whitespace-nowrap"
+        <template #icon>
+          <LucideUser class="size-4 text-ink-gray-6" />
+          <span class="whitespace-nowrap text-base"
             >{{ $route.params.team ? "Change Team" : "Go to" }}
           </span>
-        </div>
-        <FeatherIcon name="chevron-right" class="size-4 text-ink-gray-6" />
-      </button>
+        </template>
+
+        <template #suffix>
+          <LucideChevronRight class="size-4 text-ink-gray-6 ml-auto" />
+        </template>
+      </Button>
     </template>
     <template #body>
       <div
-        class="mx-3 p-1 rounded-lg border border-gray-100 bg-white shadow-xl"
+        class="p-1 rounded-lg border border-outline-gray-2 text-ink-gray-8 bg-surface-white shadow-xl"
       >
-        <div
+        <button
           v-if="teams.length"
           v-for="team of teams"
+          class="group flex h-7 w-full items-center rounded px-2 text-sm p-1 hover:bg-surface-gray-2"
           :key="getTeams.data[team].name"
         >
           <router-link
@@ -31,13 +36,16 @@
               name: 'Home',
               params: { team: getTeams.data[team].name },
             }"
-            class="block w-100 rounded justify-center items-center p-1 text-sm text-gray-700 hover:bg-gray-100"
+            @click="LISTS.forEach((k) => k.reset())"
           >
             {{ getTeams.data[team].title }}
           </router-link>
-        </div>
-        <div v-else class="w-100 text-center text-sm text-gray-700">
-          <em>No other teams</em>
+        </button>
+        <div
+          v-else
+          class="w-full text-sm text-ink-gray-7 h-7 flex justify-center items-center"
+        >
+          <div>No other teams</div>
         </div>
       </div>
     </template>
@@ -45,10 +53,10 @@
 </template>
 <script setup>
 import { Popover } from "frappe-ui"
-import { FeatherIcon } from "frappe-ui"
 import { getTeams } from "@/resources/files"
 import { computed } from "vue"
 import { useRoute } from "vue-router"
+import { LISTS } from "@/resources/files"
 
 getTeams.fetch()
 const route = useRoute()

@@ -1,5 +1,4 @@
 import { format } from "date-fns"
-
 export function formatSize(size, nDigits = 1) {
   if (size === 0) return ""
   const k = 1000 // Change base to 1000 for decimal prefixes
@@ -37,51 +36,6 @@ export function formatDate(date) {
     formattedTime = format(dateObj, "HH:mm", { timeZone })
   }
   return `${formattedDate}, ${formattedTime}`
-}
-
-export function formatMimeType(mimeType, lower = true) {
-  let icon = "unknown"
-  if (!mimeType) return icon
-  const generic = mimeType.split("/")[0]
-  const specific = mimeType.split("/")[1]
-  if (["image", "video", "audio"].includes(generic))
-    icon = generic[0].toUpperCase() + generic.slice(1)
-  else if (generic === "frappe_doc") icon = "Doc"
-  else if (generic === "link") icon = "Link"
-  else
-    switch (specific) {
-      case "pdf":
-        icon = "PDF"
-        break
-      case "vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-        icon = "Spreadsheet"
-        break
-      case "vnd.apple.numbers":
-        icon = "Spreadsheet"
-        break
-      case "vnd.openxmlformats-officedocument.presentationml.presentation":
-        icon = "Presentation"
-        break
-      case "vnd.apple.keynote":
-        icon = "Presentation"
-        break
-      case "vnd.openxmlformats-officedocument.wordprocessingml.document":
-        icon = "Word"
-        break
-      case "msword":
-        icon = "Word"
-        break
-      case "zip":
-        icon = "Zip"
-        break
-      case "x-tar":
-        icon = "Zip"
-        break
-      case "x-7z-compressed":
-        icon = "Zip"
-        break
-    }
-  return lower ? icon.toLowerCase() : icon
 }
 
 export function getDateDiffInDays(date1, date2) {

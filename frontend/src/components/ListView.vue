@@ -1,50 +1,25 @@
 <template>
   <FrappeListView
-    class="px-[10px] pt-3 select-none"
+    ref="container"
+    class="relative select-none p-5"
     row-key="name"
     :columns="selectedColumns"
     :rows="formattedRows"
-    @update:selections="handleSelections"
-    @update:active-row="setActive"
     :options="{
       selectable: true,
       enableActive: true,
       showTooltip: true,
       resizeColumn: false,
       // Should be getLink(row, false, false) - but messes up clicking
-      getRowRoute: (row) => '',
+      getRowRoute: () => '',
       emptyState: {
-        description: 'Nothing found with that search - try something else?',
+        description: 'Nothing found - try something else?',
       },
     }"
+    @update:selections="handleSelections"
+    @update:active-row="setActive"
   >
-    <ListHeader>
-      <template #default>
-        <ListHeaderItem
-          v-for="column in selectedColumns"
-          :key="column.key"
-          :item="column"
-        >
-          <template v-if="column.key === 'title'" #suffix>
-            <div class="absolute right-0 flex gap-0">
-              <TextInput
-                ref="searchInput"
-                v-model="filter"
-                type="text"
-                class="my-auto scale-[88%]"
-                :class="showSearch ? 'opacity-1' : 'opacity-0'"
-                placeholder="search..."
-              />
-
-              <Button @click=";(showSearch = !showSearch), (filter = '')">
-                <LucideSearch v-if="!showSearch" class="my-auto w-3 h-3" />
-                <LucideX v-else class="my-auto w-3 h-3" />
-              </Button>
-            </div>
-          </template>
-        </ListHeaderItem>
-      </template>
-    </ListHeader>
+    <ListHeader class="mb-[1px]" />
     <div
       v-if="!folderContents"
       class="w-full text-center flex items-center justify-center py-10"
@@ -52,11 +27,14 @@
       <LoadingIndicator class="w-8" />
     </div>
     <template v-else>
-      <div id="drop-area" class="h-full overflow-y-auto">
+      <div
+        id="drop-area"
+        class="h-full overflow-y-auto"
+      >
         <ListEmptyState v-if="!formattedRows.length" />
         <div
-          v-else-if="formattedRows[0].group"
           v-for="group in formattedRows"
+          v-else-if="formattedRows[0].group"
           :key="group.group"
         >
           <ListGroupHeader :group="group">
@@ -67,14 +45,22 @@
             />
           </ListGroupHeader>
           <ListGroupRows :group="group">
-            <CustomListRow :rows="group.rows" :context-menu="contextMenu" />
+            <CustomListRow
+              :rows="group.rows"
+              :context-menu="contextMenu"
+              @dropped="emit('dropped')"
+            />
           </ListGroupRows>
         </div>
         <div v-else="formattedRows.length">
-          <CustomListRow :rows="formattedRows" :context-menu="contextMenu" />
+          <CustomListRow
+            :rows="formattedRows"
+            :context-menu="contextMenu"
+            @dropped="(...p) => $emit('dropped', ...p)"
+          />
         </div>
       </div>
-      <p class="hidden text-center w-[20%] left-[40%] top-[50%] z-10 font-bold">
+      <p class="hidden absolute text-center w-full top-[50%] z-10 font-bold">
         Drop to upload
       </p>
     </template>
@@ -92,24 +78,26 @@
 import {
   ListHeader,
   ListGroupRows,
-  TextInput,
   ListGroupHeader,
   ListEmptyState,
-  ListHeaderItem,
   LoadingIndicator,
   ListView as FrappeListView,
   Avatar,
 } from "frappe-ui"
-import { formatMimeType } from "@/utils/format"
-import { getIconUrl } from "@/utils/getIconUrl"
+import { getThumbnailUrl } from "@/utils/getIconUrl"
 import { useStore } from "vuex"
 import { useRoute } from "vue-router"
-import { computed, h, ref, watch } from "vue"
+import { computed, h, ref, watch, useTemplateRef } from "vue"
 import ContextMenu from "@/components/ContextMenu.vue"
-import Folder from "./MimeIcons/Folder.vue"
 import CustomListRow from "./CustomListRow.vue"
 import { openEntity } from "@/utils/files"
 import { formatDate } from "@/utils/format"
+
+import { onKeyDown } from "@vueuse/core"
+import emitter from "@/emitter"
+import LucideBuilding2 from "~icons/lucide/building-2"
+import LucideUsers from "~icons/lucide/users"
+import LucideGlobe2 from "~icons/lucide/globe-2"
 
 const store = useStore()
 const route = useRoute()
@@ -118,23 +106,17 @@ const props = defineProps({
   actionItems: Array,
   userData: Object,
 })
+const emit = defineEmits(["dropped"])
 
+const container = useTemplateRef("container")
 const selections = defineModel(new Set())
 const selectedRow = ref(null)
 
 const rowEvent = ref(null)
 
-const showSearch = ref(false)
-const searchInput = ref(null)
-const filter = ref("")
-watch(showSearch, (v) => {
-  if (v) searchInput.value[0].el.focus()
-})
-
 const formattedRows = computed(() => {
   if (!props.folderContents) return []
-  if (Array.isArray(props.folderContents))
-    return props.folderContents.filter((k) => k.title.includes(filter.value))
+  if (Array.isArray(props.folderContents)) return props.folderContents
   return Object.keys(props.folderContents)
     .map((k) => ({
       group: k,
@@ -146,24 +128,21 @@ const formattedRows = computed(() => {
 
 const selectedColumns = [
   {
-    label: "Name",
+    label: __("Name"),
     key: "title",
     getLabel: ({ row: { title, is_group, document } }) =>
       title.lastIndexOf(".") === -1 || is_group || document
         ? title
         : title.slice(0, title.lastIndexOf(".")),
     getTooltip: (e) => (e.is_group || e.document ? "" : e.title),
-    prefix: ({ row }) =>
-      h("img", {
-        src: getIconUrl(
-          row.is_group ? "folder" : formatMimeType(row.mime_type)
-        ),
-        width: 16,
-      }),
+    prefix: ({ row }) => {
+      return getThumbnailUrl(row.name, row.file_type)
+    },
     width: "50%",
   },
+
   {
-    label: "Owner",
+    label: __("Owner"),
     key: "",
     getLabel: ({ row }) =>
       row.owner === store.state.user.id
@@ -175,14 +154,37 @@ const selectedColumns = [
         image: props.userData[row.owner]?.user_image,
         label:
           props.userData[row.owner]?.full_name ||
-          props.userData[row.owner]?.email,
+          props.userData[row.owner]?.email ||
+          row.owner,
         size: "sm",
       })
     },
-    width: "15%",
+    width: "10%",
   },
   {
-    label: "Last Modified",
+    label: __("Shared"),
+    key: "",
+    getLabel: ({ row }) => {
+      if (row.share_count === -2) return "Public"
+      else if (row.share_count === -1) return "Team"
+      else if (row.share_count > 0)
+        return (
+          row.share_count +
+          " " +
+          (row.share_count === 1 ? __("person") : __("people"))
+        )
+      return "-"
+    },
+    prefix: ({ row }) => {
+      if (row.share_count === -2) return h(LucideGlobe2, { class: "size-4" })
+      else if (row.share_count === -1)
+        return h(LucideBuilding2, { class: "size-4" })
+      else if (row.share_count > 0) return h(LucideUsers, { class: "size-4" })
+    },
+    width: "10%",
+  },
+  {
+    label: __("Last Modified"),
     getLabel: ({ row }) => row.relativeModified,
     getTooltip: (row) => formatDate(row.modified),
     key: "modified",
@@ -190,7 +192,7 @@ const selectedColumns = [
     width: "15%",
   },
   {
-    label: "Last Accessed",
+    label: __("Last Accessed"),
     getLabel: ({ row }) => row.relativeAccessed,
     getTooltip: (row) => formatDate(row.accessed),
     key: "modified",
@@ -198,7 +200,7 @@ const selectedColumns = [
     width: "15%",
   },
   {
-    label: "Size",
+    label: __("Size"),
     key: "",
     getLabel: ({ row }) =>
       row.is_group
@@ -206,17 +208,20 @@ const selectedColumns = [
           ? row.children + " item" + (row.children === 1 ? "" : "s")
           : "empty"
         : row.file_size_pretty,
-    width: "10%",
+    width: "8%",
   },
   { label: "", key: "options", align: "right", width: "5%" },
 ].filter((k) => !k.isEnabled || k.isEnabled(route.name))
 
-const setActive = (entity) => {
+const setActive = (entityName) => {
+  const entity = props.folderContents.find((k) => k.name === entityName)
   selectedRow.value =
     !entity || entity.name !== store.state.activeEntity?.name ? entity : null
 }
 
-watch(selectedRow, (k) => store.commit("setActiveEntity", k))
+watch(selectedRow, (k) => {
+  store.commit("setActiveEntity", k)
+})
 const dropdownActionItems = (row) => {
   if (!row) return []
   return props.actionItems
@@ -226,7 +231,7 @@ const dropdownActionItems = (row) => {
       handler: () => {
         rowEvent.value = false
         store.commit("setActiveEntity", row)
-        a.onClick([row])
+        a.action([row])
       },
     }))
 }
@@ -237,6 +242,7 @@ const contextMenu = (event, row) => {
   if (event.ctrlKey) openEntity(route.params.team, row, true)
   rowEvent.value = event
   selectedRow.value = row
+  console.log(selectedRow.value)
   event.stopPropagation()
   event.preventDefault()
 }
@@ -246,18 +252,59 @@ const handleSelections = (sels) => {
   selectedRow.value = null
   store.commit("setActiveEntity", null)
 }
+
+// Add keyboard shortcuts here as f-ui selections has to be mutated
+onKeyDown("a", (e) => {
+  // How do I do this nicely?
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  if (e.metaKey) {
+    container.value.selections.clear()
+    props.folderContents.map((k) => container.value.selections.add(k.name))
+    e.preventDefault()
+  }
+})
+onKeyDown("Backspace", (e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  if (e.metaKey) emitter.emit("remove")
+})
+onKeyDown("m", (e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  if (e.ctrlKey) emitter.emit("move")
+})
+onKeyDown("Escape", (e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  container.value.selections.clear()
+  e.preventDefault()
+})
 </script>
 <style>
 .dz-drag-hover #drop-area {
   opacity: 0.5;
-  border: black 2px dotted;
-  box-sizing: content-box;
   padding-left: 0;
   padding-right: 0;
 }
 
 .dz-drag-hover #drop-area + p {
   display: block;
-  position: absolute;
 }
 </style>

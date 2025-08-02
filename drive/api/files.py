@@ -2,14 +2,17 @@ import os, re, json, mimetypes
 
 import frappe
 from pypika import Order
-from .permissions import get_teams, user_has_permission
+from .permissions import get_user_access, user_has_permission
 from pathlib import Path
 from werkzeug.wrappers import Response
 from werkzeug.utils import secure_filename, send_file
+from io import BytesIO
 import mimemapper
+import jwt
 
 from drive.utils.files import (
     get_home_folder,
+    get_file_type,
     get_new_title,
     update_file_size,
     if_folder_exists,
@@ -20,10 +23,34 @@ import magic
 from datetime import datetime
 from drive.api.notifications import notify_mentions
 from drive.api.storage import storage_bar_data
+from pathlib import Path
+from io import BytesIO
+from werkzeug.wrappers import Response
+from werkzeug.wsgi import wrap_file
+from drive.locks.distributed_lock import DistributedLock
 
 
 @frappe.whitelist()
-def upload_file(team=None, personal=0, fullpath=None, parent=None, last_modified=None, embed=0):
+def upload_embed(is_private, folder):
+    doc = frappe.get_doc("Drive File", folder)
+    file = frappe.request.files["file"]
+    file.filename = "Embed - " + folder
+
+    # Calculate file size
+    current_pos = file.tell()
+    file.seek(0, 2)
+    file_size = file.tell()
+    file.seek(current_pos)
+    frappe.form_dict.total_file_size = file_size
+
+    embed = upload_file(doc.team, is_private, parent=folder, embed=1)
+    return {
+        "file_url": f"/api/method/drive.api.embed.get_file_content?embed_name={embed.name}&parent_entity_name={folder}"
+    }
+
+
+@frappe.whitelist()
+def upload_file(team, personal=None, fullpath=None, parent=None, last_modified=None, embed=0):
     """
     Accept chunked file contents via a multipart upload, store the file on
     disk, and insert a corresponding DriveEntity doc.
@@ -35,25 +62,18 @@ def upload_file(team=None, personal=0, fullpath=None, parent=None, last_modified
     :raises ValueError: If the size of the stored file does not match the specified filesize
     :return: DriveEntity doc once the entire file has been uploaded
     """
-    if not team:
-        team = frappe.get_value("Drive File", parent, "team")
-    embed = int(embed)
     home_folder = get_home_folder(team)
     parent = parent or home_folder["name"]
-    if isinstance(personal, str):
-        personal = int(personal)
+    is_private = personal or frappe.get_value("Drive File", parent, "is_private")
+    embed = int(embed)
 
     if fullpath:
         dirname = os.path.dirname(fullpath).split("/")
         for i in dirname:
-            parent = if_folder_exists(team, i, parent, personal)
+            parent = if_folder_exists(team, i, parent, is_private)
 
-    # Validate: team members can upload to team folders, and permissions
-    is_team_member = team in get_teams() and not personal
-    if not is_team_member and not frappe.has_permission(
-        doctype="Drive File", doc=parent, ptype="write", user=frappe.session.user
-    ):
-        frappe.throw("Cannot upload due to insufficient permissions", frappe.PermissionError)
+    if not user_has_permission(parent, "upload"):
+        frappe.throw("Ask the folder owner for upload access.", frappe.PermissionError)
 
     storage_data = storage_bar_data(team)
     if (storage_data["limit"] - storage_data["total_size"]) < int(
@@ -61,15 +81,23 @@ def upload_file(team=None, personal=0, fullpath=None, parent=None, last_modified
     ):
         frappe.throw("You're out of storage!", ValueError)
 
-    file = frappe.request.files["file"]
-    upload_session = frappe.form_dict.uuid
-    title = get_new_title(frappe.form_dict.filename if embed else file.filename, parent)
-    current_chunk = int(frappe.form_dict.chunk_index)
-    total_chunks = int(frappe.form_dict.total_chunk_count)
+    # Support non-chunked uploads too
+    if frappe.form_dict.chunk_index:
+        current_chunk = int(frappe.form_dict.chunk_index)
+        total_chunks = int(frappe.form_dict.total_chunk_count)
+        offset = int(frappe.form_dict.chunk_byte_offset)
+    else:
+        offset = 0
+        current_chunk = 0
+        total_chunks = 1
 
+    file = frappe.request.files["file"]
+    title = get_new_title(file.filename, parent)
+    upload_session = frappe.form_dict.uuid
     temp_path = get_upload_path(home_folder["name"], f"{upload_session}_{secure_filename(title)}")
+
     with temp_path.open("ab") as f:
-        f.seek(int(frappe.form_dict.chunk_byte_offset))
+        f.seek(offset)
         f.write(file.stream.read())
         if (
             not f.tell() >= int(frappe.form_dict.total_file_size)
@@ -78,19 +106,20 @@ def upload_file(team=None, personal=0, fullpath=None, parent=None, last_modified
             return
 
     # Validate that file size is matching
-    file_size = temp_path.stat().st_size
-    if file_size != int(frappe.form_dict.total_file_size):
-        temp_path.unlink()
-        frappe.throw("Size on disk does not match specified filesize.", ValueError)
+    if frappe.form_dict.total_file_size:
+        file_size = temp_path.stat().st_size
+        if file_size != int(frappe.form_dict.total_file_size):
+            temp_path.unlink()
+            frappe.throw("Size on disk does not match specified filesize.", ValueError)
 
-    mime_type = mimemapper.get_mime_type(temp_path.suffix[1:])
+    mime_type = mimemapper.get_mime_type(str(temp_path), native_first=False)
     if mime_type is None:
         mime_type = magic.from_buffer(open(temp_path, "rb").read(2048), mime=True)
 
     # Create DB record
     drive_file = create_drive_file(
         team,
-        personal,
+        is_private,
         title,
         parent,
         file_size,
@@ -103,19 +132,8 @@ def upload_file(team=None, personal=0, fullpath=None, parent=None, last_modified
 
     # Upload and update parent folder size
     manager = FileManager()
-    manager.upload_file(temp_path, drive_file.path)
+    manager.upload_file(str(temp_path), drive_file.path, drive_file if not embed else None)
     update_file_size(parent, file_size)
-
-    if mime_type.startswith(("image", "video")) and not embed:
-        try:
-            frappe.enqueue(
-                manager.upload_thumbnail,
-                now=True,
-                at_front=True,
-                file=drive_file,
-            )
-        except:
-            pass
 
     return drive_file
 
@@ -148,7 +166,7 @@ def upload_chunked_file(personal=0, parent=None, last_modified=None):
     if not frappe.has_permission(
         doctype="Drive File", doc=parent, ptype="write", user=frappe.session.user
     ):
-        frappe.throw("Cannot upload due to insufficient permissions", frappe.PermissionError)
+        frappe.throw("Ask the folder owner for upload access.", frappe.PermissionError)
 
     file = frappe.request.files["file"]
 
@@ -191,16 +209,61 @@ def upload_chunked_file(personal=0, parent=None, last_modified=None):
 
 
 @frappe.whitelist()
+def get_thumbnail(entity_name):
+    drive_file = frappe.get_value(
+        "Drive File",
+        entity_name,
+        ["is_group", "path", "title", "mime_type", "file_size", "owner", "team", "document"],
+        as_dict=1,
+    )
+    if not drive_file or drive_file.is_group or drive_file.is_link:
+        frappe.throw("No thumbnail for this type.", ValueError)
+    if not frappe.has_permission(
+        doctype="Drive File", doc=drive_file.name, ptype="write", user=frappe.session.user
+    ):
+        frappe.throw("Cannot upload due to insufficient permissions", frappe.PermissionError)
+
+    with DistributedLock(drive_file.path, exclusive=False):
+        thumbnail_data = None
+        if frappe.cache().exists(entity_name):
+            thumbnail_data = frappe.cache().get_value(entity_name)
+
+        if not thumbnail_data:
+            manager = FileManager()
+            try:
+                if drive_file.mime_type.startswith("text"):
+                    with manager.get_file(drive_file.path) as f:
+                        thumbnail_data = f.read()[:1000].decode("utf-8").replace("\n", "<br/>")
+                elif drive_file.mime_type == "frappe_doc":
+                    html = frappe.get_value("Drive Document", drive_file.document, "raw_content")
+                    thumbnail_data = html[:1000]
+                else:
+                    thumbnail = manager.get_thumbnail(drive_file.team, entity_name)
+                    thumbnail_data = BytesIO(thumbnail.read())
+                    frappe.cache().set_value(entity_name, thumbnail_data, expires_in_sec=60 * 60)
+            except FileNotFoundError:
+                return ""
+
+    if thumbnail_data:
+        frappe.cache().set_value(entity_name, thumbnail_data, expires_in_sec=60 * 60)
+
+    if isinstance(thumbnail_data, BytesIO):
+        response = Response(
+            wrap_file(frappe.request.environ, thumbnail_data),
+            direct_passthrough=True,
+        )
+        response.headers.set("Content-Type", "image/jpeg")
+        response.headers.set("Content-Disposition", "inline", filename=entity_name)
+        return response
+    else:
+        return thumbnail_data
+
+
+@frappe.whitelist()
 def create_document_entity(title, personal, team, content, parent=None):
     home_directory = get_home_folder(team)
     parent = parent or home_directory.name
-
-    if not frappe.has_permission(
-        doctype="Drive File",
-        doc=parent,
-        ptype="write",
-        user=frappe.session.user,
-    ):
+    if not user_has_permission(parent, "upload"):
         frappe.throw(
             "Cannot access folder due to insufficient permissions",
             frappe.PermissionError,
@@ -249,7 +312,7 @@ def create_drive_file(
         }
     )
     drive_file.flags.file_created = True
-    drive_file.insert()
+    drive_file.insert(ignore_permissions=True)
     drive_file.path = str(entity_path(drive_file.name))
     drive_file.save()
     if last_modified:
@@ -273,9 +336,7 @@ def create_folder(team, title, personal=False, parent=None):
     home_folder = get_home_folder(team)
     parent = parent or home_folder.name
 
-    if not frappe.has_permission(
-        doctype="Drive File", doc=parent, ptype="write", user=frappe.session.user
-    ):
+    if not user_has_permission(parent, "upload"):
         frappe.throw(
             "Cannot create folder due to insufficient permissions",
             frappe.PermissionError,
@@ -304,6 +365,7 @@ def create_folder(team, title, personal=False, parent=None):
                 "is_private": 1,
             }
         )
+    # BROKEN: capitlization?
     if entity_exists:
         suggested_name = get_new_title(title, parent, folder=True)
         frappe.throw(
@@ -322,7 +384,7 @@ def create_folder(team, title, personal=False, parent=None):
             "is_private": personal,
         }
     )
-    drive_file.insert()
+    drive_file.insert(ignore_permissions=True)
 
     return drive_file
 
@@ -386,29 +448,19 @@ def create_link(team, title, link, personal=False, parent=None):
 
 
 @frappe.whitelist()
-def save_doc(entity_name, doc_name, raw_content, content, file_size, mentions, settings=None):
-    write_perms = user_has_permission(
-        frappe.get_doc("Drive File", entity_name), "write", frappe.session.user
-    )
-    comment_perms = user_has_permission(
-        frappe.get_doc("Drive File", entity_name), "comment", frappe.session.user
-    )
-    # BROKEN - comment access is write access
-    if not write_perms and not comment_perms:
-        raise frappe.PermissionError("You do not have permission to view this file")
-    if settings:
-        frappe.db.set_value("Drive Document", doc_name, "settings", json.dumps(settings))
-    file_size = len(content.encode("utf-8")) + len(raw_content.encode("utf-8"))
-    update_modifed = comment_perms and not write_perms
-    frappe.db.set_value("Drive Document", doc_name, "content", content)
-    frappe.db.set_value("Drive Document", doc_name, "raw_content", raw_content)
-    frappe.db.set_value("Drive Document", doc_name, "mentions", json.dumps(mentions))
-    if (
-        frappe.db.get_value("Drive File", entity_name, "file_size") != int(file_size)
-        and write_perms
-    ):
-        frappe.db.set_value("Drive File", entity_name, "file_size", file_size)
-    if json.dumps(mentions):
+def save_doc(entity_name, doc_name, content):
+    access = get_user_access(frappe.get_doc("Drive File", entity_name))
+    if not access["comment"] and not access["write"]:
+        raise frappe.PermissionError("You do not have permission to edit this file")
+    if not content:
+        return
+
+    frappe.db.set_value("Drive Document", doc_name, "raw_content", content)
+    frappe.db.set_value("Drive File", entity_name, "file_size", len(content.encode("utf-8")))
+
+    mentions = extract_mentions(content)
+    if mentions:
+        frappe.db.set_value("Drive Document", doc_name, "mentions", mentions)
         frappe.enqueue(
             notify_mentions,
             queue="long",
@@ -420,7 +472,10 @@ def save_doc(entity_name, doc_name, raw_content, content, file_size, mentions, s
             entity_name=entity_name,
             document_name=doc_name,
         )
-    return
+
+
+def extract_mentions(content):
+    return []
 
 
 @frappe.whitelist()
@@ -459,8 +514,25 @@ def get_doc_version_list(entity_name):
     )
 
 
+@frappe.whitelist()
+def create_auth_token(entity_name):
+    if not frappe.has_permission(
+        doctype="Drive File",
+        doc=entity_name,
+        ptype="read",
+        user=frappe.session.user,
+    ):
+        raise frappe.PermissionError("You do not have permission to view this file")
+    settings = frappe.get_single("Drive Site Settings")
+    key = settings.get_password("jwt_key", raise_exception=False)
+    return jwt.encode(
+        {"name": entity_name, "expiry": (datetime.now() + timedelta(minutes=1)).timestamp()},
+        key=key,
+    )
+
+
 @frappe.whitelist(allow_guest=True)
-def get_file_content(entity_name, trigger_download=0):
+def get_file_content(entity_name, trigger_download=0, jwt_token=None):
     """
     Stream file content and optionally trigger download
 
@@ -470,42 +542,59 @@ def get_file_content(entity_name, trigger_download=0):
     :raises ValueError: If the DriveEntity doc does not exist or is not a file
     :raises PermissionError: If the current user does not have permission to read the file
     :raises FileLockedError: If the file has been writer-locked
+
+    JWT tokens are a vulnerability - if used, they bypass all permissions and give the file.
+    Only the file name and secret token is needed to get access to all files.
+
+    A more secure way would be a DB-stored auth token that can only be created by someone with read access.
     """
-    if not frappe.has_permission(
+    if jwt_token:
+        settings = frappe.get_single("Drive Site Settings")
+        auth = jwt.decode(jwt_token, key=settings.get_password("jwt_key"), algorithms=["HS256"])
+        if datetime.now().timestamp() > auth["expiry"] or auth["name"] != entity_name:
+            raise frappe.PermissionError("You do not have permission to view this file")
+    elif not frappe.has_permission(
         doctype="Drive File",
         doc=entity_name,
         ptype="read",
         user=frappe.session.user,
     ):
         raise frappe.PermissionError("You do not have permission to view this file")
+
     trigger_download = int(trigger_download)
     drive_file = frappe.get_value(
         "Drive File",
         {"name": entity_name, "is_active": 1},
         [
             "is_group",
+            "is_link",
             "path",
             "title",
             "mime_type",
             "file_size",
             "is_active",
             "owner",
+            "document",
         ],
         as_dict=1,
     )
-    if not drive_file or drive_file.is_group or drive_file.is_active != 1:
+    if not drive_file or drive_file.is_group or drive_file.is_link or drive_file.is_active != 1:
         frappe.throw("Not found", frappe.NotFound)
 
-    manager = FileManager()
-    return send_file(
-        manager.get_file(drive_file.path),
-        mimetype=drive_file.mime_type,
-        as_attachment=trigger_download,
-        conditional=True,
-        max_age=3600,
-        download_name=drive_file.title,
-        environ=frappe.request.environ,
-    )
+    if drive_file.document:
+        html = frappe.get_value("Drive Document", drive_file.document, "raw_content")
+        return html
+    else:
+        manager = FileManager()
+        return send_file(
+            manager.get_file(drive_file.path),
+            mimetype=drive_file.mime_type,
+            as_attachment=trigger_download,
+            conditional=True,
+            max_age=3600,
+            download_name=drive_file.title,
+            environ=frappe.request.environ,
+        )
 
 
 def stream_file_content(drive_file, range_header):
@@ -573,31 +662,6 @@ def list_entity_comments(entity_name):
     return query.run(as_dict=True)
 
 
-@frappe.whitelist()
-def unshare_entities(entity_names, move=False):
-    """
-    Unshare DriveEntities
-
-    :param entity_names: List of document-names
-    :type entity_names: list[str]
-    :param move: if True, moves entity to root entity of user
-    :type move: Boolean
-    :raises ValueError: If decoded entity_names is not a list
-    """
-
-    if isinstance(entity_names, str):
-        entity_names = json.loads(entity_names)
-    if not isinstance(entity_names, list):
-        frappe.throw(f"Expected list but got {type(entity_names)}", ValueError)
-    for entity in entity_names:
-        doc = frappe.get_doc("Drive File", entity)
-        if not doc:
-            frappe.throw("Entity does not exist", ValueError)
-        if move:
-            doc.move()
-        doc.unshare(frappe.session.user)
-
-
 def delete_background_job(entity, ignore_permissions):
     frappe.delete_doc("Drive File", entity, ignore_permissions=ignore_permissions)
 
@@ -615,35 +679,13 @@ def delete_entities(entity_names=None, clear_all=None):
         entity_names = frappe.db.get_list(
             "Drive File", {"is_active": 0, "owner": frappe.session.user}, pluck="name"
         )
-    if isinstance(entity_names, str):
+    elif isinstance(entity_names, str):
         entity_names = json.loads(entity_names)
-    if not isinstance(entity_names, list):
-        frappe.throw(f"Expected list but got {type(entity_names)}", ValueError)
+    elif not isinstance(entity_names, list) or not entity_names:
+        frappe.throw(f"Expected non-empty list but got {type(entity_names)}", ValueError)
+
     for entity in entity_names:
-        root_entity = get_ancestors_of(entity)
-        if root_entity:
-            root_entity = get_ancestors_of(entity)[0]
-        else:
-            # BROKEN
-            pass
-        owns_root_entity = frappe.has_permission(
-            doctype="Drive File",
-            doc=root_entity,
-            ptype="write",
-            user=frappe.session.user,
-        )
-        has_write_access = frappe.has_permission(
-            doctype="Drive File", doc=entity, ptype="write", user=frappe.session.user
-        )
-        ignore_permissions = owns_root_entity or has_write_access
-        frappe.db.set_value("Drive File", entity, "is_active", -1)
-        frappe.enqueue(
-            delete_background_job,
-            queue="default",
-            timeout=None,
-            entity=entity,
-            ignore_permissions=ignore_permissions,
-        )
+        frappe.get_doc("Drive File", entity).permanent_delete()
 
 
 @frappe.whitelist()
@@ -710,8 +752,6 @@ def remove_or_restore(entity_names, team):
         frappe.throw(f"Expected list but got {type(entity_names)}", ValueError)
 
     def depth_zero_toggle_is_active(doc):
-        folder_size = frappe.db.get_value("Drive File", doc.parent_entity, "file_size")
-
         if doc.is_active:
             flag = 0
         else:
@@ -720,6 +760,7 @@ def remove_or_restore(entity_names, team):
             flag = 1
 
         doc.is_active = flag
+        folder_size = frappe.db.get_value("Drive File", doc.parent_entity, "file_size")
         frappe.db.set_value(
             "Drive File",
             doc.parent_entity,
@@ -739,7 +780,7 @@ def remove_or_restore(entity_names, team):
 
 
 @frappe.whitelist(allow_guest=True)
-def call_controller_method(entity_name, method):
+def call_controller_method():
     """
     Call a whitelisted Drive File controller method
 
@@ -748,13 +789,12 @@ def call_controller_method(entity_name, method):
     :raises ValueError: If the entity does not exist
     :return: The result of the controller method
     """
-    # broken
-    drive_file = frappe.get_doc("Drive File", frappe.local.form_dict.pop("entity_name"))
+    method = frappe.local.form_dict.pop("method")
+    entity_name = frappe.local.form_dict.pop("entity_name")
+    frappe.local.form_dict.pop("cmd")
+    drive_file = frappe.get_doc("Drive File", entity_name)
     if not drive_file:
         frappe.throw("Entity does not exist", ValueError)
-    method = frappe.local.form_dict.pop("method")
-    drive_file.is_whitelisted(method)
-    frappe.local.form_dict.pop("cmd")
     return drive_file.run_method(method, **frappe.local.form_dict)
 
 
@@ -802,10 +842,22 @@ def auto_delete_from_trash():
     days_before = (date.today() - timedelta(days=30)).isoformat()
     result = frappe.db.get_all(
         "Drive File",
-        filters={"is_active": 0, "trashed_on": ["<", days_before]},
+        filters={"is_active": 0, "last_modified": ["<", days_before]},
         fields=["name"],
     )
     delete_entities(result)
+
+
+def clear_deleted_files():
+    days_before = (date.today() + timedelta(days=30)).isoformat()
+    result = frappe.db.get_all(
+        "Drive File",
+        filters={"is_active": -1, "modified": ["<", days_before]},
+        fields=["name"],
+    )
+    for entity in result:
+        doc = frappe.get_doc("Drive File", entity, ignore_permissions=True)
+        doc.delete()
 
 
 @frappe.whitelist()
@@ -831,25 +883,24 @@ def move(entity_names, new_parent=None, is_private=None):
     :raises FileExistsError: If a file or folder with the same name already exists in the specified parent folder
     :return: DriveEntity doc once file is moved
     """
-
     if isinstance(entity_names, str):
         entity_names = json.loads(entity_names)
-    if not isinstance(entity_names, list):
-        frappe.throw(f"Expected list but got {type(entity_names)}", ValueError)
+    if not entity_names or not isinstance(entity_names, list):
+        frappe.throw(f"Expected a non-empty list but got {type(entity_names)}", ValueError)
+
     for entity in entity_names:
         doc = frappe.get_doc("Drive File", entity)
-        doc.move(new_parent)
-        if is_private is not None:
-            doc.is_private = int(is_private)
-        doc.save()
+        res = doc.move(new_parent, is_private)
+    if res["title"] == "Drive - " + res["team"]:
+        res["title"] = "Home" if res["is_private"] else "Team"
 
-    return
+    return res
 
 
 @frappe.whitelist()
 def search(query, team):
     """
-    Placeholder search implementation
+    Basic search implementation
     """
     text = frappe.db.escape(" ".join(k + "*" for k in query.split()))
     user = frappe.db.escape(frappe.session.user)
@@ -858,7 +909,7 @@ def search(query, team):
         result = frappe.db.sql(
             f"""
         SELECT  `tabDrive File`.name,
-                `tabDrive File`.title, 
+                `tabDrive File`.title,
                 `tabDrive File`.is_group,
                 `tabDrive File`.is_link,
                 `tabDrive File`.mime_type,
@@ -874,10 +925,12 @@ def search(query, team):
             AND (`tabDrive File`.`owner` = {user} OR `tabDrive File`.is_private = 0)
             AND `tabDrive File`.`parent_entity` <> ''
             AND MATCH(title) AGAINST ({text} IN BOOLEAN MODE)
-        GROUP  BY `tabDrive File`.`name` 
+        GROUP  BY `tabDrive File`.`name`
         """,
             as_dict=1,
         )
+        for r in result:
+            r["file_type"] = get_file_type(r)
         return result
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Frappe Drive Search Error")
@@ -893,20 +946,20 @@ def get_ancestors_of(entity_name):
     entity_name = frappe.db.escape(entity_name)
     result = frappe.db.sql(
         f"""
-        WITH RECURSIVE generated_path as ( 
-        SELECT 
+        WITH RECURSIVE generated_path as (
+        SELECT
             `tabDrive File`.name,
             `tabDrive File`.parent_entity
-        FROM `tabDrive File` 
+        FROM `tabDrive File`
         WHERE `tabDrive File`.name = {entity_name}
 
         UNION ALL
 
-        SELECT 
+        SELECT
             t.name,
             t.parent_entity
         FROM generated_path as gp
-        JOIN `tabDrive File` as t ON t.name = gp.parent_entity) 
+        JOIN `tabDrive File` as t ON t.name = gp.parent_entity)
         SELECT name FROM generated_path;
     """,
         as_dict=0,
@@ -931,3 +984,52 @@ def export_media(entity_name):
     return frappe.get_list(
         "Drive File", filters={"parent_entity": entity_name}, fields=["name", "title"]
     )
+
+
+@frappe.whitelist()
+def create_comment(entity_name, name, content, is_reply, parent_name=None):
+    doc = frappe.get_doc("Drive File", entity_name)
+    parent = frappe.get_doc("Drive Comment", parent_name) if is_reply else doc
+
+    if not user_has_permission(doc, "comment"):
+        raise PermissionError("You don't have comment access")
+
+    comment = frappe.get_doc(
+        {
+            "doctype": "Drive Comment",
+            "name": name,
+            "content": content,
+        }
+    )
+    parent.append("replies" if is_reply else "comments", comment)
+    parent.save(ignore_permissions=True)
+    comment.insert(ignore_permissions=True)
+    return comment.name
+
+
+@frappe.whitelist()
+def edit_comment(name, content):
+    comment = frappe.get_doc("Drive Comment", name)
+    if comment.owner != frappe.session.user:
+        raise PermissionError("You can't edit comments you don't own.")
+    comment.content = content
+    comment.save()
+    return name
+
+
+@frappe.whitelist()
+def delete_comment(name, entire=True):
+    comment = frappe.get_doc("Drive Comment", name)
+    if comment.owner != frappe.session.user:
+        raise PermissionError("You can't edit comments you don't own.")
+    if entire:
+        for r in comment.replies:
+            r.delete()
+    comment.delete()
+
+
+@frappe.whitelist()
+def resolve_comment(name, value):
+    comment = frappe.get_doc("Drive Comment", name)
+    comment.resolved = value
+    comment.save()

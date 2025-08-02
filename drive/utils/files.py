@@ -9,6 +9,7 @@ import os
 import boto3
 import frappe
 from io import BytesIO
+from botocore.config import Config
 
 
 DriveFile = frappe.qb.DocType("Drive File")
@@ -28,21 +29,6 @@ MIME_LIST_MAP = {
     "PDF": ["application/pdf"],
     "Text": [
         "text/plain",
-        "text/html",
-        "text/css",
-        "text/javascript",
-        "application/javascript",
-        "text/rich-text",
-        "text/x-shellscript",
-        "text/markdown",
-        "application/json",
-        "application/x-httpd-php",
-        "text/x-python",
-        "application/x-python-script",
-        "application/x-sql",
-        "text/x-perl",
-        "text/x-csrc",
-        "text/x-sh",
     ],
     "XML Data": ["application/xml"],
     "Document": [
@@ -67,6 +53,23 @@ MIME_LIST_MAP = {
         "application/vnd.oasis.opendocument.presentation",
         "application/vnd.apple.keynote",
     ],
+    "Code": [
+        "text/x-python",
+        "text/html",
+        "text/css",
+        "text/javascript",
+        "application/javascript",
+        "text/rich-text",
+        "text/x-shellscript",
+        "text/markdown",
+        "application/json",
+        "application/x-httpd-php",
+        "application/x-python-script",
+        "application/x-sql",
+        "text/x-perl",
+        "text/x-csrc",
+        "text/x-sh",
+    ],
     "Audio": ["audio/mpeg", "audio/wav", "audio/x-midi", "audio/ogg", "audio/mp4", "audio/mp3"],
     "Video": ["video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-matroska"],
     "Book": ["application/epub+zip", "application/x-mobipocket-ebook"],
@@ -85,7 +88,30 @@ MIME_LIST_MAP = {
 }
 
 
+def get_file_type(r):
+    if r["is_group"]:
+        return "Folder"
+    elif r["is_link"]:
+        return "Link"
+    else:
+        try:
+            return next(k for (k, v) in MIME_LIST_MAP.items() if r["mime_type"] in v)
+        except StopIteration:
+            return "Unknown"
+
+
 class FileManager:
+    ACCEPTABLE_MIME_TYPES = [
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.oasis.opendocument.presentation",
+    ]
+
     def __init__(self):
         settings = frappe.get_single("Drive S3 Settings")
         self.s3_enabled = settings.enabled
@@ -96,37 +122,63 @@ class FileManager:
                 "s3",
                 aws_access_key_id=settings.aws_key,
                 aws_secret_access_key=settings.get_password("aws_secret"),
+                endpoint_url=(settings.endpoint_url or None),
+                config=Config(signature_version=settings.signature_version),
             )
 
-    def upload_file(self, current_path: str, new_path: str) -> None:
+    def can_create_thumbnail(self, file):
+        # Don't create thumbnails for text files
+        return (
+            file.mime_type.startswith(("image", "video"))
+            or file.mime_type == "application/pdf"
+            or file.mime_type in FileManager.ACCEPTABLE_MIME_TYPES
+        )
+
+    def upload_file(self, current_path: str, new_path: str, drive_file: str = None) -> None:
         """
         Moves the file from the current path to another path
         """
         if self.s3_enabled:
             self.conn.upload_file(current_path, self.bucket, new_path)
+            if drive_file and self.can_create_thumbnail(drive_file):
+                frappe.enqueue(
+                    self.upload_thumbnail,
+                    now=True,
+                    at_front=True,
+                    file=drive_file,
+                    file_path=current_path,
+                )
+            else:
+                os.remove(current_path)
         else:
             os.rename(current_path, self.site_folder / new_path)
+            if drive_file and self.can_create_thumbnail(drive_file):
+                frappe.enqueue(
+                    self.upload_thumbnail,
+                    now=True,
+                    at_front=True,
+                    file=drive_file,
+                    file_path=str(self.site_folder / new_path),
+                )
 
-    def upload_thumbnail(self, file):
+    def upload_thumbnail(self, file, file_path: str):
         """
         Creates a thumbnail for the file on disk and then uploads to the relevant team directory
         """
         team_directory = get_home_folder(file.team)["name"]
-        save_path = Path(team_directory) / "thumbnails" / (file.name + ".thumbnail")
-        disk_path = self.site_folder / save_path
+        save_path = Path(team_directory) / "thumbnails" / (file.name + ".png")
+        disk_path = str((self.site_folder / save_path).resolve())
 
         with DistributedLock(file.path, exclusive=False):
             try:
-                # BROKEN - get from S3
+                # Keep image/video thumbnail as `thumbnail` results in very dark thumbnails (albeit better)
                 if file.mime_type.startswith("image"):
-                    image_path = self.site_folder / file.path
-                    with Image.open(image_path).convert("RGB") as image:
+                    with Image.open(file_path).convert("RGB") as image:
                         image = ImageOps.exif_transpose(image)
                         image.thumbnail((512, 512))
                         image.save(str(disk_path), format="webp")
                 elif file.mime_type.startswith("video"):
-                    video_path = str(file.path)
-                    cap = cv2.VideoCapture(video_path)
+                    cap = cv2.VideoCapture(file_path)
                     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                     target_frame = int(frame_count / 2)
                     cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
@@ -137,14 +189,39 @@ class FileManager:
                         frame,
                         [int(cv2.IMWRITE_WEBP_QUALITY), 50],
                     )
-                    with open(str(disk_path), "wb") as f:
+                    with open(disk_path, "wb") as f:
                         f.write(thumbnail_encoded)
-            except:
-                pass
+                else:
+                    from thumbnail import generate_thumbnail
 
-        if self.s3_enabled:
-            self.conn.upload_file(disk_path, self.bucket, str(save_path))
-            disk_path.unlink()
+                    # Word document thumbnail
+                    generate_thumbnail(
+                        file_path,
+                        disk_path,
+                        {
+                            "trim": False,
+                            "height": 512,
+                            "width": 512,
+                            "quality": 100,
+                            "type": "thumbnail",
+                        },
+                    )
+                final_path = Path(disk_path)
+                if self.s3_enabled:
+                    os.remove(file_path)
+                    self.conn.upload_file(
+                        final_path, self.bucket, str(save_path.with_suffix(".thumbnail"))
+                    )
+                    final_path.unlink()
+                else:
+                    final_path.rename(final_path.with_suffix(".thumbnail"))
+
+            except Exception:
+                if self.s3_enabled:
+                    try:
+                        os.remove(file_path)
+                    except FileNotFoundError:
+                        pass
 
     def get_file(self, path):
         """
@@ -152,19 +229,33 @@ class FileManager:
 
         Temporary: if not found in S3, look at disk.
         """
-        not_s3 = not self.s3_enabled
         if self.s3_enabled:
             try:
                 buf = self.conn.get_object(Bucket=self.bucket, Key=path)["Body"]
             except:
-                not_s3 = True
-
-        if not_s3:
+                return ""
+        else:
             with DistributedLock(path, exclusive=False):
                 with open(self.site_folder / path, "rb") as fh:
                     buf = BytesIO(fh.read())
 
         return buf
+
+    def get_thumbnail_path(self, team, name):
+        return Path(get_home_folder(team)["name"]) / "thumbnails" / (name + ".thumbnail")
+
+    def get_thumbnail(self, team, name):
+        return self.get_file(str(self.get_thumbnail_path(team, name)))
+
+    def delete_file(self, team, name, path):
+        if self.s3_enabled:
+            self.conn.delete_object(Bucket=self.bucket, Key=path)
+        else:
+            try:
+                (self.site_folder / path).unlink()
+                self.get_thumbnail_path(team, name).unlink()
+            except FileNotFoundError:
+                pass
 
 
 def get_home_folder(team):
@@ -236,62 +327,12 @@ def get_team_thumbnails_directory(team_name):
     )
 
 
-def create_thumbnail(entity_name, path, mime_type, team):
-    user_thumbnails_directory = get_team_thumbnails_directory(team)
-    thumbnail_savepath = Path(user_thumbnails_directory, entity_name + ".thumbnail")
-
-    with DistributedLock(path, exclusive=False):
-        if mime_type.startswith("image"):
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    image_path = path
-                    with Image.open(image_path).convert("RGB") as image:
-                        image = ImageOps.exif_transpose(image)
-                        image.thumbnail((512, 512))
-                        image.save(str(thumbnail_savepath), format="webp")
-                    break
-                except Exception as e:
-                    print(e)
-                    print(f"Failed to create thumbnail. Retry {retry_count+1}/{max_retries}")
-                    retry_count += 1
-            else:
-                print("Failed to create thumbnail after maximum retries.")
-
-        if mime_type.startswith("video"):
-            max_retries = 3
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    video_path = str(path)
-                    cap = cv2.VideoCapture(video_path)
-                    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    target_frame = int(frame_count / 2)
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
-                    ret, frame = cap.read()
-                    cap.release()
-                    _, thumbnail_encoded = cv2.imencode(
-                        # ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 30]
-                        ".webp",
-                        frame,
-                        [int(cv2.IMWRITE_WEBP_QUALITY), 50],
-                    )
-                    with open(str(thumbnail_savepath) + ".thumbnail", "wb") as f:
-                        f.write(thumbnail_encoded)
-                    break
-                except Exception as e:
-                    print(f"Failed to create thumbnail. Retry {retry_count+1}/{max_retries}")
-                    retry_count += 1
-            else:
-                print("Failed to create thumbnail after maximum retries.")
-
-
 def dribble_access(path):
     default_access = {
         "read": 0,
         "comment": 0,
         "share": 0,
+        "upload": 0,
         "write": 0,
     }
     result = {}
@@ -309,10 +350,9 @@ def generate_upward_path(entity_name, user=None):
     Stops when parent_drive_file IS NULL
     """
     entity = frappe.db.escape(entity_name)
-    if not user:
+    if user is None:
         user = frappe.session.user
     user = frappe.db.escape(user if user != "Guest" else "")
-
     result = frappe.db.sql(
         f"""WITH RECURSIVE
             generated_path as (
@@ -349,6 +389,7 @@ def generate_upward_path(entity_name, user=None):
             gp.is_private,
             gp.team,
             p.read,
+            p.upload,
             p.write,
             p.comment,
             p.share
@@ -407,3 +448,7 @@ def if_folder_exists(team, folder_name, parent, personal):
 
     if existing_folder:
         return existing_folder.name
+    else:
+        d = frappe.get_doc({"doctype": "Drive File", **values})
+        d.insert()
+        return d.name

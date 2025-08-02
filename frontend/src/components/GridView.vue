@@ -1,19 +1,25 @@
 <template>
+  <!-- pt-1 to accomodate borders -->
   <div
     v-if="rows?.length"
-    class="grid-container px-[10px] pt-3 overflow-scroll"
+    class="grid-container gap-5 p-5 pb-[60px] overflow-auto select-none"
   >
     <div
       v-for="file in rows"
       :id="file.name"
       :key="file.name"
-      class="grid-item rounded-lg border group select-none entity cursor-pointer relative sm:w-[182px] sm:h-[182px]"
+      class="grid-item rounded-lg group select-none entity cursor-pointer relative h-[172px] border bg-surface-white"
       :class="[
-        selections.has(file.name)
-          ? 'bg-green-100 shadow-green'
-          : 'border-gray-200 hover:shadow-xl',
+        selections.has(file.name) || selectedRow?.name === file.name
+          ? 'bg-surface-gray-2 shadow-gray'
+          : 'border-outline-gray-modals hover:shadow-lg',
+        draggedItem === file.name ? 'opacity-60 hover:shadow-none' : '',
       ]"
       :draggable="true"
+      @dragstart="draggedItem = file.name"
+      @dragend="draggedItem = null"
+      @dragover="file.is_group && $event.preventDefault()"
+      @drop="$emit('dropped', file, draggedItem)"
       @click.meta="
         selections.has(file.name)
           ? selections.delete(file.name)
@@ -23,24 +29,24 @@
       @contextmenu="contextMenu($event, file)"
       @mousedown.stop
     >
-      <FeatherIcon
-        v-if="file.is_favourite"
+      <LucideStar
+        v-if="$route.name !== 'Favourites' && file.is_favourite"
         class="stroke-amber-500 fill-amber-500 z-10 absolute top-2 left-2 h-4"
-        name="star"
         width="16"
         height="16"
       />
       <Button
         :variant="'subtle'"
-        @click.stop="contextMenu($event, file)"
-        class="z-10 duration-300 absolute invisible top-2 right-2"
+        class="z-10 duration-300 absolute top-2 right-2"
         :class="[
-          selections.size > 0
+          selections.size > 0 ? '' : '!bg-surface-gray-3 hover:shadow-lg',
+          selectedRow?.name === file.name
             ? ''
-            : '!bg-gray-300 hover:bg-gray-400 group-hover:visible',
+            : 'invisible group-hover:visible',
         ]"
+        @click.stop="contextMenu($event, file)"
       >
-        <FeatherIcon class="h-4" name="more-horizontal" />
+        <LucideMoreHorizontal class="size-4" />
       </Button>
       <GridItem :file="file" />
     </div>
@@ -48,8 +54,8 @@
   <ContextMenu
     v-if="rowEvent && selectedRow"
     :key="selectedRow.name"
-    v-on-outside-click="() => (rowEvent = false)"
-    :close="() => (rowEvent = false)"
+    v-on-outside-click="() => ((rowEvent = false), (selectedRow = null))"
+    :close="() => ((rowEvent = false), (selectedRow = null))"
     :action-items="dropdownActionItems(selectedRow)"
     :event="rowEvent"
   />
@@ -57,35 +63,29 @@
 
 <script setup>
 import GridItem from "@/components/GridItem.vue"
-import { FeatherIcon, Button } from "frappe-ui"
+import emitter from "@/emitter"
+import { Button } from "frappe-ui"
 import { ref, computed } from "vue"
 import { openEntity } from "@/utils/files"
 import { useRoute } from "vue-router"
 import { useStore } from "vuex"
 import { settings } from "@/resources/permissions"
+import { onKeyDown } from "@vueuse/core"
 
 const props = defineProps({
   folderContents: Object,
   actionItems: Array,
   userData: Object,
 })
+const emit = defineEmits(["dropped"])
 const route = useRoute()
 const store = useStore()
-const selections = defineModel(Set)
+const selections = defineModel(new Set())
 
 const rows = computed(() => props.folderContents)
 const action = (settings.data.message || settings.data).single_click
   ? "click"
   : "dblclick"
-
-defineEmits([
-  "entitySelected",
-  "openEntity",
-  "showEntityContext",
-  "showEmptyEntityContext",
-  "fetchFolderContents",
-  "updateOffset",
-])
 
 const selectedRow = ref(null)
 const rowEvent = ref(null)
@@ -110,7 +110,7 @@ const dropdownActionItems = (row) => {
       handler: () => {
         rowEvent.value = false
         store.commit("setActiveEntity", row)
-        a.onClick([row])
+        a.action([row])
       },
     }))
 }
@@ -118,15 +118,58 @@ const open = (row) =>
   !selections.value.size &&
   route.name !== "Trash" &&
   openEntity(route.params.team, row)
+
+const draggedItem = ref(null)
+
+onKeyDown("a", (e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  if (e.metaKey) {
+    selections.value = new Set(props.folderContents.map((k) => k.name))
+    e.preventDefault()
+  }
+})
+onKeyDown("Backspace", (e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  if (e.metaKey) emitter.emit("remove")
+})
+onKeyDown("m", (e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  if (e.ctrlKey) emitter.emit("move")
+})
+onKeyDown("Escape", (e) => {
+  if (
+    e.target.classList.contains("ProseMirror") ||
+    e.target.tagName === "INPUT" ||
+    e.target.tagName === "TEXTAREA"
+  )
+    return
+  selections.value = new Set()
+  e.preventDefault()
+})
 </script>
 <style scoped>
 .grid-container {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(182px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-auto-columns: minmax(170px, 1fr);
 }
 
-.shadow-green {
-  box-shadow: 0px 0px 0px 2px rgba(91, 185, 140, 1);
+.shadow-gray {
+  box-shadow: 0px 0px 0px 2px rgb(161, 159, 159);
 }
 </style>

@@ -2,7 +2,7 @@ import frappe
 from frappe.utils import getdate
 
 from drive.utils.users import mark_as_viewed
-from drive.utils.files import get_valid_breadcrumbs, generate_upward_path
+from drive.utils.files import get_valid_breadcrumbs, generate_upward_path, get_file_type
 
 
 ENTITY_FIELDS = [
@@ -24,7 +24,7 @@ ENTITY_FIELDS = [
 
 
 @frappe.whitelist(allow_guest=True)
-def get_user_access(entity, user=frappe.session.user):
+def get_user_access(entity, user=None):
     """
     Return the user specific access permissions for an entity if it exists or general access permissions
 
@@ -32,23 +32,25 @@ def get_user_access(entity, user=frappe.session.user):
     :return: Dict of general access permissions (read, write)
     :rtype: frappe._dict or None
     """
+    if not user:
+        user = frappe.session.user
     if isinstance(entity, str):
-        entity = frappe.get_doc("Drive File", entity)
-
+        entity = frappe.get_cached_doc("Drive File", entity)
     if user == entity.owner:
-        return {"read": 1, "comment": 1, "share": 1, "write": 1, "type": "admin"}
+        return {"read": 1, "comment": 1, "share": 1, "upload": 1, "write": 1, "type": "admin"}
 
     # Default access based on public or team view
     teams = get_teams(user)
     if entity.team in teams and entity.is_private == 0:
-        # Everyone can upload to team folders
-        admin = is_admin(entity.team)
+        # Everyone can upload to team folders, and admins can edit all files
+        access_level = get_access_level(entity.team)
         access = {
             "read": 1,
             "comment": 1,
             "share": 1,
-            "write": 1 if (entity.is_group or admin) else 0,
-            "type": "team-admin" if not admin else "team",
+            "upload": int(entity.is_group),
+            "write": int(access_level == 2 or entity.owner == user),
+            "type": {2: "team-admin", 1: "team", 0: "guest"}[access_level],
         }
     else:
         access = {
@@ -56,15 +58,23 @@ def get_user_access(entity, user=frappe.session.user):
             "comment": 0,
             "share": 0,
             "write": 0,
+            "upload": 0,
         }
 
     path = generate_upward_path(entity.name, user)
     user_access = {k: v for k, v in path[-1].items() if k in access.keys()}
-    if user == "Guest":
+    if not user or user == "Guest":
         return user_access
+
     public_path = generate_upward_path(entity.name, "Guest")
     public_access = {k: v for k, v in public_path[-1].items() if k in access.keys()}
-    for access_type in (user_access, public_access):
+
+    valid_accesses = [user_access, public_access]
+    if entity.team in teams:
+        team_path = generate_upward_path(entity.name, "$TEAM")
+        team_access = {k: v for k, v in team_path[-1].items() if k in access.keys()}
+        valid_accesses.append(team_access)
+    for access_type in valid_accesses:
         for type, v in access_type.items():
             if v:
                 access[type] = 1
@@ -75,7 +85,12 @@ def get_user_access(entity, user=frappe.session.user):
 @frappe.whitelist()
 def is_admin(team):
     drive_team = {k.user: k for k in frappe.get_doc("Drive Team", team).users}
-    return drive_team[frappe.session.user].is_admin
+    return drive_team[frappe.session.user].access_level == 2
+
+
+def get_access_level(team):
+    drive_team = {k.user: k for k in frappe.get_doc("Drive Team", team).users}
+    return drive_team[frappe.session.user].access_level
 
 
 @frappe.whitelist()
@@ -110,7 +125,10 @@ def get_entity_with_permissions(entity_name):
     :rtype: frappe._dict
     """
     entity = frappe.db.get_value(
-        "Drive File", {"is_active": 1, "name": entity_name}, ENTITY_FIELDS + ["team"], as_dict=1
+        "Drive File",
+        {"is_active": 1, "name": entity_name},
+        ENTITY_FIELDS + ["team", "modified"],
+        as_dict=1,
     )
     if not entity:
         frappe.throw("We couldn't find what you're looking for.", {"error": frappe.NotFound})
@@ -132,17 +150,38 @@ def get_entity_with_permissions(entity_name):
         ["entity as is_favourite"],
     )
     mark_as_viewed(entity)
-    return_obj = entity | user_access | owner_info | breadcrumbs | {"is_favourite": favourite}
-    entity_doc_content = (
-        frappe.db.get_value(
-            "Drive Document",
-            entity.document,
-            ["content", "raw_content", "settings", "version"],
-            as_dict=1,
-        )
-        or {}
+    file_type = get_file_type(entity)
+    return_obj = (
+        entity
+        | user_access
+        | owner_info
+        | breadcrumbs
+        | {"is_favourite": favourite, "file_type": file_type}
     )
-    return return_obj | entity_doc_content
+    if entity.document:
+        entity_doc_content = (
+            frappe.db.get_value(
+                "Drive Document",
+                entity.document,
+                ["content", "raw_content", "settings", "version"],
+                as_dict=1,
+            )
+            or {}
+        )
+        comments = frappe.get_all(
+            "Drive Comment",
+            filters={"parenttype": "Drive File", "parent": entity.name},
+            fields=["content", "owner", "creation", "name", "resolved"],
+        )
+        for k in comments:
+            k["replies"] = frappe.get_all(
+                "Drive Comment",
+                filters={"parenttype": "Drive Comment", "parent": k["name"]},
+                fields=["content", "owner", "creation", "name"],
+            )
+
+        return_obj |= entity_doc_content | {"comments": comments, "modified": entity.modified}
+    return return_obj
 
 
 @frappe.whitelist()
@@ -161,9 +200,17 @@ def get_shared_with_list(entity):
         raise frappe.PermissionError
     permissions = frappe.db.get_all(
         "Drive Permission",
-        filters={"entity": entity, "user": ["!=", ""]},
+        filters=[["entity", "=", entity], ["user", "!=", ""], ["user", "!=", "$TEAM"]],
         order_by="user",
-        fields=["user", "read", "write", "comment", "share"],
+        fields=["user", "read", "write", "comment", "upload", "share"],
+    )
+
+    owner = frappe.db.get_value("Drive File", entity, "owner")
+    permissions.insert(
+        0,
+        frappe.db.get_value(
+            "User", owner, ["user_image", "full_name", "name as user"], as_dict=True
+        ),
     )
 
     for p in permissions:
@@ -174,30 +221,14 @@ def get_shared_with_list(entity):
     return permissions
 
 
-# BROKEN
-@frappe.whitelist()
-def update_document_invalidation(entity_name, invalidation_date):
-    x = frappe.get_list(
-        "Drive DocShare",
-        filters={"share_name": entity_name, "share_doctype": "Drive File"},
-        order_by="creation desc",
-        fields=["name", "valid_until", "share_parent"],
-    )
-    for i in x:
-        doc = frappe.get_doc("Drive DocShare", i.name)
-        doc.valid_until = invalidation_date
-        doc.save()
-
-
-def auto_delete_expired_docshares():
+def auto_delete_expired_perms():
     current_date = getdate()
     expired_documents = frappe.get_list(
         "Drive Permission",
         filters=[
-            ["valid_until", "<", current_date],
             ["valid_until", "is", "set"],
+            ["valid_until", "<", current_date],
         ],
-        order_by="creation desc",
         fields=["name", "valid_until"],
     )
     if expired_documents:
@@ -207,12 +238,26 @@ def auto_delete_expired_docshares():
                 frappe.delete_doc("Drive Permission", d.name)
 
         frappe.enqueue(batch_delete_perms, docs=expired_documents)
-    return
 
 
-def user_has_permission(doc, ptype, user):
-    if doc.owner == user or user == "Administrator":
+def user_has_permission(doc, ptype, user=None):
+    if not user:
+        user = frappe.session.user
+    if user == "Administrator":
         return True
     access = get_user_access(doc, user)
+    print(user, access, ptype in access)
     if ptype in access:
-        return access[ptype]
+        return bool(access[ptype])
+
+
+def get_permission_query_conditions(user):
+    """
+    Limit the query to only show records owned by the user
+    Should be more granular in the future, but Drive permissions are so complicated that it's better to enforce
+    developers to use Drive's whitelisted methods.
+    """
+    if not user:
+        user = frappe.session.user
+    if not "Desk User" in frappe.get_roles(user):
+        return """(`tabDrive File`.owner = {user})""".format(user=frappe.db.escape(user))

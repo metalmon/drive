@@ -1,39 +1,34 @@
 <template>
   <div class="flex items-center mb-6">
-    <h1 class="font-semibold">Tags</h1>
+    <h1 class="font-semibold text-ink-gray-9">
+      {{ __("Tags") }}
+    </h1>
     <Button
       class="ml-auto mr-4"
       variant="solid"
       icon-left="plus"
       @click="showNewTagDialog = true"
     >
-      New
+      {{ __("New") }}
     </Button>
   </div>
   <div class="flex flex-col items-stretch justify-start overflow-y-auto">
-    <div v-for="(tag, i) in $resources.getTagsWithOwner.data" :key="tag.name">
+    <div
+      v-for="(tag, i) in $resources.getTagsWithOwner.data"
+      :key="tag.name"
+    >
       <div
-        class="flex items-center justify-start text-sm py-1.5 gap-x-1.5 w-full"
+        class="flex items-center justify-between text-sm py-1.5 gap-x-1.5 w-full"
         :class="i > 0 ? 'border-t' : ''"
       >
-        <svg
-          class="h-2.5"
-          width="16"
-          height="16"
-          viewBox="0 0 16 16"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          <circle
-            r="4.5"
-            cx="8"
-            cy="8"
+        <div class="flex gap-2 items-center">
+          <LucideCircle
+            class="size-2"
             :fill="tag.color"
             :stroke="tag.color"
-            stroke-width="3"
           />
-        </svg>
-        <span class="text-sm text-gray-800">{{ tag.title }}</span>
+          <span class="text-sm text-ink-gray-8">{{ tag.title }}</span>
+        </div>
         <Dropdown
           class="ml-auto"
           placement="right"
@@ -56,21 +51,20 @@
             },
           ]"
         >
-          <Button variant="ghost" @click="selectedTag = tag">
+          <Button variant="ghost">
             <template #icon>
-              <FeatherIcon
-                name="more-horizontal"
-                class="h-4 w-4"
-              /> </template></Button
-        ></Dropdown>
+              <LucideMoreHorizontal class="size-4" />
+            </template>
+          </Button>
+        </Dropdown>
       </div>
     </div>
     <div
       v-if="!$resources.getTagsWithOwner.data?.length"
       class="h-full w-full flex flex-col items-center justify-center my-auto"
     >
-      <LucideTag class="h-7 stroke-1 text-gray-600" />
-      <span class="text-gray-800 text-sm mt-2">No Tags</span>
+      <LucideTag class="h-7 stroke-1 text-ink-gray-5" />
+      <span class="text-ink-gray-8 text-sm mt-2">No Tags</span>
     </div>
   </div>
   <NewTagDialog
@@ -105,7 +99,7 @@
   />
 </template>
 <script>
-import { Dropdown, Button, FeatherIcon, Dialog } from "frappe-ui"
+import { Dropdown, Button, Dialog } from "frappe-ui"
 import NewTagDialog from "./NewTagDialog.vue"
 import EditTagDialog from "./EditTagDialog.vue"
 
@@ -114,7 +108,6 @@ export default {
   components: {
     Dropdown,
     Button,
-    FeatherIcon,
     NewTagDialog,
     EditTagDialog,
     Dialog,

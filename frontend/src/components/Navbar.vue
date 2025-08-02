@@ -2,347 +2,288 @@
   <nav
     ondragstart="return false;"
     ondrop="return false;"
-    class="bg-white border-b w-full px-4 py-2.5 h-12 flex items-center justify-between"
+    class="bg-surface-white border-b w-full px-5 py-2.5 h-12 flex items-center justify-between"
   >
-    <div class="flex">
-      <div v-if="selections?.length" class="flex flex-col">
-        <div class="font text-md">
-          <span class="font-semibold">{{ selections.length }}</span> item{{
-            selections.length === 1 ? "" : "s"
-          }}
-          selected
-        </div>
-      </div>
-      <Breadcrumbs
-        v-else
-        :items="store.state.breadcrumbs"
-        :class="'select-none'"
-      >
-        <template #prefix="{ item }">
-          <LoadingIndicator v-if="item.loading" scale="70" />
-        </template>
-      </Breadcrumbs>
-      <div
-        v-if="$route.name === 'Shared'"
-        class="ml-5 bg-gray-100 rounded-[10px] space-x-0.5 h-7 flex items-center px-0.5 py-1"
-      >
-        <Button
-          variant="ghost"
-          class="max-h-6 leading-none transition-colors focus:outline-none"
-          :class="[
-            store.state.shareView === 'with'
-              ? 'bg-white shadow-sm hover:bg-white active:bg-white'
-              : '',
-          ]"
-          @click="store.commit('toggleShareView', 'with')"
-        >
-          With you
-        </Button>
-        <Button
-          variant="ghost"
-          class="max-h-6 leading-none transition-colors focus:outline-none"
-          :class="[
-            store.state.shareView === 'by'
-              ? 'bg-white shadow-sm hover:bg-white active:bg-white'
-              : '',
-          ]"
-          @click="store.commit('toggleShareView', 'by')"
-        >
-          By you
-        </Button>
-      </div>
-      <div
-        v-if="activeFilters.length"
-        class="flex flex-wrap items-start justify-end gap-1 ml-3"
-      >
-        <div v-for="(item, index) in activeFilters" :key="index">
-          <div class="flex items-center border rounded pl-2 py-1 h-7 text-base">
-            <component :is="item.icon"></component>
-            <span class="text-sm ml-2">{{ item.label }}</span>
-            <Button
-              variant="minimal"
-              @click="
-                item.title
-                  ? activeTags.splice(index, 1)
-                  : activeFilters.splice(index, 1)
-              "
-            >
-              <template #icon>
-                <FeatherIcon class="h-3 w-3" name="x" />
-              </template>
-            </Button>
-          </div>
-        </div>
-        <div v-for="(item, index) in activeTags" :key="index">
-          <div class="flex items-center border rounded pl-2 py-1 h-7 text-base">
-            <svg
-              v-if="item.color"
-              width="16"
-              height="16"
-              viewBox="0 0 16 16"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <circle
-                r="4.5"
-                cx="8"
-                cy="8"
-                :fill="item.color"
-                :stroke="item.color"
-                stroke-width="3"
-              />
-            </svg>
-            <span class="text-sm ml-2">{{ item.title }}</span>
-
-            <Button
-              variant="minimal"
-              @click="store.state.activeTags.splice(index, 1)"
-            >
-              <template #icon>
-                <FeatherIcon class="h-3 w-3" name="x" />
-              </template>
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div class="flex gap-2">
-      <template v-if="selections && !selections.length">
-        <Dropdown
-          v-if="columnHeaders"
-          :options="orderByItems"
-          placement="right"
-          class="basis-auto"
-        >
-          <div class="flex items-center whitespace-nowrap">
-            <Button
-              class="text-sm h-7 border-r border-slate-200 rounded-r-none"
-              @click.stop="toggleAscending"
-            >
-              <DownArrow
-                :class="{
-                  '[transform:rotateX(180deg)]': sortOrder.ascending,
-                }"
-                class="h-3.5"
-              />
-            </Button>
-            <Button class="text-sm h-7 rounded-l-none flex-1 md:block">
-              {{ sortOrder.label }}
-            </Button>
-          </div>
-        </Dropdown>
-        <Dropdown :options="filterItems" placement="right">
-          <Tooltip text="Filter">
-            <Button>
-              <Filter />
-            </Button>
-          </Tooltip>
-        </Dropdown>
+    <Breadcrumbs
+      :items="store.state.breadcrumbs"
+      :class="'select-none'"
+    >
+      <template #prefix="{ item, index }">
+        <LoadingIndicator
+          v-if="item.loading"
+          width="20"
+          scale="70"
+        />
         <div
-          class="bg-gray-100 rounded-md space-x-0.5 h-7 px-0.5 py-1 flex items-center"
+          v-if="index == 0"
+          class="mr-1.5"
         >
-          <Button
-            variant="ghost"
-            class="max-h-6 leading-none transition-colors focus:outline-none"
-            :class="[
-              store.state.view === 'grid'
-                ? 'bg-white shadow-sm hover:bg-white active:bg-white'
-                : '',
-            ]"
-            @click="store.commit('toggleView', 'grid')"
-          >
-            <ViewGrid />
-          </Button>
-          <Button
-            variant="ghost"
-            class="max-h-6 leading-none transition-colors focus:outline-none"
-            :class="[
-              store.state.view === 'list'
-                ? 'bg-white shadow-sm hover:bg-white active:bg-white'
-                : '',
-            ]"
-            @click="store.commit('toggleView', 'list')"
-          >
-            <ViewList />
-          </Button>
+          <component
+            :is="COMPONENT_MAP[item.name]"
+            class="size-4 text-ink-gray-6"
+          />
         </div>
-
-        <div v-if="!store.getters.isLoggedIn" class="ml-2">
-          <Button variant="solid" @click="$router.push({ name: 'Login' })">
-            Sign In
-          </Button>
-        </div>
-
-        <template v-for="button of possibleButtons" :key="button.route">
-          <Button
-            v-if="$route.name === button.route"
-            class="line-clamp-1 truncate w-full"
-            :disabled="!button.entities.data?.length"
-            variant="subtle"
-            :theme="button.theme || 'gray'"
-            @click="emitter.emit('showCTADelete')"
-          >
-            <template #prefix>
-              <FeatherIcon :name="button.icon" class="w-4" />
-            </template>
-            {{ button.label }}
-          </Button>
-        </template>
-        <Dropdown
-          v-if="['Folder', 'Home', 'Team'].includes($route.name)"
-          :options="newEntityOptions"
-          placement="left"
-          class="basis-5/12 lg:basis-auto"
-        >
-          <Tooltip text="Add or upload">
-            <Button variant="solid">
-              <div class="flex">
-                <FeatherIcon name="plus" class="w-4 h-4" />
-              </div>
-            </Button>
-          </Tooltip>
-        </Dropdown>
       </template>
-      <div v-else class="flex gap-3 ml-4 overflow-scroll">
-        <template
-          v-if="actionItems"
-          v-for="item in actionItems
-            .filter((i) => i.important && (selections.length === 1 || i.multi))
-            .filter(
-              (i) =>
-                !i.isEnabled ||
-                selections.every((e) => i.isEnabled(e, selections.length !== 1))
-            )"
-          :key="item.label"
+    </Breadcrumbs>
+
+    <div class="flex gap-2">
+      <div
+        id="navbar-content"
+        class="flex align-center"
+      />
+      <LucideStar
+        v-if="rootEntity?.is_favourite"
+        width="16"
+        height="16"
+        class="my-auto stroke-amber-500 fill-amber-500"
+      />
+      <Dropdown
+        v-if="dropdownAction"
+        :options="dropdownAction"
+        placement="left"
+      >
+        <Button
+          variant="ghost"
+          @click="triggerRoot"
         >
-          <Tooltip :text="item.label">
-            <Button variant="outline" @click.once="item.onClick(selections)">
-              <div class="flex">
-                <FeatherIcon
-                  v-if="typeof item.icon === 'string'"
-                  :name="item.icon"
-                  class="w-4 h-4 text-gray-800"
-                  :class="[item.class, item.danger ? 'text-red-500' : '']"
-                />
-                <component
-                  :is="item.icon"
-                  v-else
-                  class="h-4 w-4 text-gray-800"
-                  :class="[item.class, item.danger ? 'text-red-500' : '']"
-                />
-              </div>
-            </Button>
-          </Tooltip>
+          <LucideMoreHorizontal
+            name="more-horizontal"
+            class="size-4"
+          />
+        </Button>
+      </Dropdown>
+
+      <Dropdown
+        v-if="
+          ['Folder', 'Home', 'Team'].includes($route.name) &&
+          isLoggedIn &&
+          props.rootResource?.data?.write !== false
+        "
+        :options="newEntityOptions"
+        placement="right"
+        class="basis-5/12 lg:basis-auto"
+      >
+        <Button variant="solid">
+          <div class="flex">
+            <LucidePlus class="size-4" />
+          </div>
+        </Button>
+      </Dropdown>
+      <Button
+        v-if="button"
+        class="line-clamp-1 truncate w-full"
+        :disabled="!button.entities.data?.length"
+        variant="subtle"
+        :theme="button.theme || 'gray'"
+        @click="emitter.emit('showCTADelete')"
+      >
+        <template #prefix>
+          <component
+            :is="button.icon"
+            class="size-4"
+          />
         </template>
-      </div>
+        {{ button.label }}
+      </Button>
+
       <div
         v-if="connectedUsers.length > 1 && isLoggedIn"
-        class="hidden sm:flex bg-gray-200 rounded justify-center items-center px-1"
+        class="hidden sm:flex bg-surface-gray-3 rounded justify-center items-center px-1"
       >
         <UsersBar />
       </div>
 
-      <div v-if="!isLoggedIn" class="ml-auto">
-        <Button variant="solid" @click="$router.push({ name: 'Login' })">
+      <div
+        v-if="!isLoggedIn"
+        class="ml-auto"
+      >
+        <Button
+          variant="solid"
+          @click="$router.push({ name: 'Login' })"
+        >
           Sign In
         </Button>
       </div>
     </div>
+    <Dialogs
+      v-if="$route.name === 'File' || $route.name === 'Document'"
+      v-model="dialog"
+      :root-resource
+    />
   </nav>
-  <Dialogs :selections="activeEls" />
 </template>
 <script setup>
 import UsersBar from "./UsersBar.vue"
-import Dialogs from "./Dialogs.vue"
 import {
   Button,
   Breadcrumbs,
   LoadingIndicator,
-  FeatherIcon,
   Dropdown,
+  Tooltip,
+  Switch,
 } from "frappe-ui"
-import { ICON_TYPES } from "@/utils/files"
-import Share from "./EspressoIcons/Share.vue"
 import { useStore } from "vuex"
-import ViewGrid from "@/components/EspressoIcons/ViewGrid.vue"
-import ViewList from "@/components/EspressoIcons/ViewList.vue"
-import DownArrow from "./EspressoIcons/DownArrow.vue"
-import Filter from "./EspressoIcons/Filter.vue"
-import NewFolder from "./EspressoIcons/NewFolder.vue"
-import Link from "./EspressoIcons/Link.vue"
-import FileUpload from "./EspressoIcons/File-upload.vue"
-import FolderUpload from "./EspressoIcons/Folder-upload.vue"
-import NewFile from "./EspressoIcons/NewFile.vue"
 import emitter from "@/emitter"
-import { computed, watch, ref } from "vue"
+import { ref, computed } from "vue"
+import { entitiesDownload } from "@/utils/download"
 import {
   getRecents,
   getFavourites,
   getTrash,
   createDocument,
+  toggleFav,
 } from "@/resources/files"
 import { useRoute, useRouter } from "vue-router"
-import Tooltip from "frappe-ui/src/components/Tooltip/Tooltip.vue"
+import { getLink } from "@/utils/files"
 
+import LucideClock from "~icons/lucide/clock"
+import LucideHome from "~icons/lucide/home"
+import LucideTrash from "~icons/lucide/trash"
+import LucideUsers from "~icons/lucide/users"
+import LucideBuilding2 from "~icons/lucide/building-2"
+import LucideStar from "~icons/lucide/star"
+import LucideShare2 from "~icons/lucide/share-2"
+import LucideDownload from "~icons/lucide/download"
+import LucideLink from "~icons/lucide/link"
+import LucideMoveUpRight from "~icons/lucide/move-up-right"
+import LucideSquarePen from "~icons/lucide/square-pen"
+import LucideInfo from "~icons/lucide/info"
+import LucideFileUp from "~icons/lucide/file-up"
+import LucideFolderUp from "~icons/lucide/folder-up"
+import LucideFilePlus2 from "~icons/lucide/file-plus-2"
+import LucideFolderPlus from "~icons/lucide/folder-plus"
+
+const COMPONENT_MAP = {
+  Home: LucideHome,
+  Team: LucideBuilding2,
+  Favourites: LucideStar,
+  Shared: LucideUsers,
+  Trash: LucideTrash,
+  Recents: LucideClock,
+}
 const store = useStore()
 const route = useRoute()
 const router = useRouter()
 
-const activeFilters = ref(store.state.activeFilters)
-const sortOrder = ref(store.state.sortOrder)
-
+const props = defineProps({
+  actions: Array,
+  triggerRoot: Function,
+  rootResource: Object,
+})
 const isLoggedIn = computed(() => store.getters.isLoggedIn)
 const connectedUsers = computed(() => store.state.connectedUsers)
-const activeTags = computed(() => store.state.activeTags)
-const activeEls = computed(() => {
-  return [store.state.activeEntity]
-})
-const filterItems = computed(() => {
-  return ICON_TYPES.filter((item) => !activeFilters.value.includes(item.label))
-})
+const dialog = ref("")
+const rootEntity = computed(() => props.rootResource?.data)
 
-const props = defineProps({
-  selections: Array,
-  actionItems: Array,
-  columnHeaders: Array,
+const dropdownAction = computed(() => {
+  if (!rootEntity.value?.title) return
+  let actions = []
+  if (props.actions) {
+    if (props.actions[0] === "extend") actions = props.actions.slice(1)
+    else return props.actions
+  }
+  return [
+    {
+      group: true,
+      hideLabel: true,
+      items: [
+        {
+          label: __("Share"),
+          icon: LucideShare2,
+          onClick: () => (dialog.value = "s"),
+          isEnabled: () => rootEntity.value.share,
+        },
+        {
+          label: __("Download"),
+          icon: LucideDownload,
+          onClick: () =>
+            entitiesDownload(route.params.team, [rootEntity.value]),
+        },
+        {
+          label: __("Copy Link"),
+          icon: LucideLink,
+          onClick: () => getLink(rootEntity.value),
+        },
+      ],
+    },
+    {
+      group: true,
+      hideLabel: true,
+      items: [
+        {
+          label: __("Move"),
+          icon: LucideMoveUpRight,
+          onClick: () => (dialog.value = "m"),
+          isEnabled: () => rootEntity.value.write,
+        },
+        {
+          label: __("Rename"),
+          icon: LucideSquarePen,
+          onClick: () => (dialog.value = "rn"),
+          isEnabled: () => rootEntity.value.write,
+        },
+        {
+          label: __("Show Info"),
+          icon: LucideInfo,
+          onClick: () => infoEntities.value.push(store.state.activeEntity),
+          isEnabled: () => !store.state.activeEntity || !store.state.showInfo,
+        },
+        {
+          label: __("Hide Info"),
+          icon: LucideInfo,
+          onClick: () => (dialog.value = "info"),
+          isEnabled: () => store.state.activeEntity && store.state.showInfo,
+        },
+        {
+          label: __("Favourite"),
+          icon: LucideStar,
+          onClick: () => {
+            rootEntity.value.is_favourite = true
+            toggleFav.submit({
+              entities: [{ name: rootEntity.value.name, is_favourite: false }],
+            })
+          },
+          isEnabled: () => !rootEntity.value.is_favourite,
+        },
+        {
+          label: __("Unfavourite"),
+          icon: LucideStar,
+          color: "stroke-amber-500 fill-amber-500",
+          onClick: () => {
+            rootEntity.value.is_favourite = false
+            toggleFav.submit({
+              entities: [{ name: rootEntity.value.name, is_favourite: false }],
+            })
+          },
+          isEnabled: () => rootEntity.value.is_favourite,
+        },
+      ],
+    },
+    {
+      group: true,
+      hideLabel: true,
+      items: [
+        {
+          label: __("Delete"),
+          icon: LucideTrash,
+          onClick: () => (dialog.value = "remove"),
+          isEnabled: () => rootEntity.value.write,
+          theme: "red",
+        },
+      ],
+    },
+    { group: true, hideLabel: true, items: actions },
+  ].map((k) => {
+    return { ...k, items: k.items.filter((l) => !l.isEnabled || l.isEnabled()) }
+  })
 })
-
-watch(sortOrder, (val) => store.commit("setSortOrder", val))
-watch(activeFilters.value, (val) => store.commit("setActiveFilters", val))
-const orderByItems = computed(() => {
-  return props.columnHeaders.map((header) => ({
-    ...header,
-    onClick: () =>
-      (sortOrder.value = {
-        field: header.field,
-        label: header.label,
-        ascending: sortOrder.value?.ascending,
-      }),
-  }))
-})
-ICON_TYPES.forEach((t) => {
-  t.onClick = () => activeFilters.value.push(t)
-})
-
-// onMounted(() => {
-//   for (let element of document.getElementsByTagName("button")) {
-//     element.classList.remove("focus:ring-2", "focus:ring-offset-2")
-//   }
-// })
 
 // Functions
-const toggleAscending = () => {
-  sortOrder.value = {
-    ...sortOrder.value,
-    ascending: !sortOrder.value.ascending,
-  }
-}
-
 const newDocument = async () => {
   let data = await createDocument.submit({
     title: "Untitled Document",
     team: route.params.team,
-    personal: store.state.breadcrumbs[0].label === "Home" ? 1 : 0,
+    personal: store.state.breadcrumbs[0].name === "Home" ? 1 : 0,
     content: null,
     parent: store.state.currentFolder.name,
   })
@@ -356,21 +297,29 @@ const newDocument = async () => {
 
 // Constants
 const possibleButtons = [
-  { route: "Recents", label: "Clear", icon: "clock", entities: getRecents },
+  {
+    route: "Recents",
+    label: __("Clear"),
+    icon: LucideClock,
+    entities: getRecents,
+  },
   {
     route: "Favourites",
-    label: "Clear",
-    icon: "star",
+    label: __("Clear"),
+    icon: LucideStar,
     entities: getFavourites,
   },
   {
     route: "Trash",
-    label: "Empty",
-    icon: "trash",
+    label: __("Empty"),
+    icon: LucideTrash,
     entities: getTrash,
     theme: "red",
   },
 ]
+const button = computed(() =>
+  possibleButtons.find((k) => k.route == route.name)
+)
 
 const newEntityOptions = [
   {
@@ -378,33 +327,33 @@ const newEntityOptions = [
     items: [
       {
         label: "Upload File",
-        icon: FileUpload,
+        icon: LucideFileUp,
         onClick: () => emitter.emit("uploadFile"),
       },
       {
         label: "Upload Folder",
-        icon: FolderUpload,
+        icon: LucideFolderUp,
         onClick: () => emitter.emit("uploadFolder"),
       },
     ],
   },
   {
-    group: "New...",
+    group: "Create",
     items: [
       {
         label: "Document",
-        icon: NewFile,
+        icon: LucideFilePlus2,
         onClick: newDocument,
       },
       {
         label: "Folder",
-        icon: NewFolder,
+        icon: LucideFolderPlus,
         onClick: () => emitter.emit("newFolder"),
       },
 
       {
         label: "New Link",
-        icon: Link,
+        icon: LucideLink,
         onClick: () => emitter.emit("newLink"),
       },
     ],

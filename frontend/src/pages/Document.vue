@@ -1,178 +1,175 @@
 <template>
-  <FolderContentsError v-if="document.error" :error="document.error" />
+  <Navbar
+    v-if="!document.error"
+    :root-resource="document"
+    :actions="
+      dynamicList([
+        'extend',
+        {
+          icon: MessagesSquare,
+          label: 'Show Comments',
+          onClick: () => (showComments = true),
+          isEnabled: () => !showComments,
+          cond: entity?.comments?.length,
+        },
+        {
+          icon: MessagesSquare,
+          label: 'Hide Comments',
+          onClick: () => (showComments = false),
+          isEnabled: () => showComments,
+          cond: entity?.comments?.length,
+        },
+        {
+          icon: MessageSquareDot,
+          label: 'Show Resolved',
+          onClick: () => (showResolved = true),
+          isEnabled: () => !showResolved,
+          cond: entity?.comments?.length,
+        },
+        {
+          icon: MessageSquareDot,
+          label: 'Hide Resolved',
+          onClick: () => (showResolved = false),
+          isEnabled: () => showResolved,
+          cond: entity?.comments?.length,
+        },
+      ])
+    "
+  />
+  <ErrorPage
+    v-if="document.error"
+    :error="document.error"
+  />
   <LoadingIndicator
     v-else-if="!document.data && document.loading"
     :error="document.error"
     class="w-10 h-full text-neutral-100 mx-auto"
   />
-  <Navbar />
   <div class="flex w-full overflow-auto">
     <TextEditor
-      v-if="contentLoaded"
-      v-model:yjsContent="yjsContent"
-      v-model:rawContent="rawContent"
-      v-model:lastSaved="lastSaved"
-      v-model:settings="settings"
-      :user-list="allUsers.data || []"
-      :fixed-menu="true"
-      :bubble-menu="true"
-      :timeout="timeout"
-      :is-writable="isWritable"
-      :entity-name="entityName"
+      v-if="entity"
+      ref="editor"
+      v-model:edited="edited"
+      v-model:raw-content="rawContent"
+      v-model:show-comments="showComments"
       :entity="entity"
-      @mentioned-users="(val) => (mentionedUsers = val)"
+      :users="allUsers.data || []"
+      :show-comments
       @save-document="saveDocument"
     />
   </div>
 </template>
 
 <script setup>
-import { fromUint8Array, toUint8Array } from "js-base64"
 import Navbar from "@/components/Navbar.vue"
 import {
   ref,
-  computed,
   inject,
   onMounted,
   defineAsyncComponent,
+  provide,
   onBeforeUnmount,
 } from "vue"
 import { useRoute } from "vue-router"
 import { useStore } from "vuex"
-import { createResource } from "frappe-ui"
-import { watchDebounced } from "@vueuse/core"
-import { setBreadCrumbs } from "@/utils/files"
+import { createResource, LoadingIndicator } from "frappe-ui"
+import { setBreadCrumbs, prettyData, updateURLSlug } from "@/utils/files"
 import { allUsers } from "@/resources/permissions"
-import router from "@/router"
-import LoadingIndicator from "frappe-ui/src/components/LoadingIndicator.vue"
+import { toast } from "../utils/toasts"
+
+import MessagesSquare from "~icons/lucide/messages-square"
+import MessageSquareDot from "~icons/lucide/message-square-dot"
+import LucideWifi from "~icons/lucide/wifi"
+import LucideWifiOff from "~icons/lucide/wifi-off"
+import LucideFileWarning from "~icons/lucide/file-warning"
+import { dynamicList } from "../utils/files"
 
 const TextEditor = defineAsyncComponent(() =>
   import("@/components/DocEditor/TextEditor.vue")
 )
 
-const store = useStore()
-const route = useRoute()
-const emitter = inject("emitter")
-
 const props = defineProps({
   entityName: String,
   team: String,
+  slug: String,
 })
 
-// Reactive data properties
-const oldTitle = ref(null)
-const title = ref(null)
-const yjsContent = ref(null)
-const settings = ref(null)
-const rawContent = ref(null)
-const contentLoaded = ref(false)
-const isWritable = ref(false)
-const entity = ref(null)
-const mentionedUsers = ref([])
-const timeout = ref(1000 + Math.floor(Math.random() * 1000))
-const saveCount = ref(0)
-const lastSaved = ref(0)
-const titleVal = computed(() => title.value || oldTitle.value)
-const comments = computed(() => store.state.allComments)
-const userId = computed(() => store.state.user.id)
-let intervalId = ref(null)
+const store = useStore()
+const route = useRoute()
+const emitter = inject("emitter")
+const showResolved = ref(false)
+provide("showResolved", showResolved)
 
-setTimeout(() => {
-  watchDebounced(
-    [rawContent, comments],
-    () => {
-      saveDocument()
-    },
-    {
-      debounce: timeout.value,
-      maxWait: 30000,
-      immediate: true,
-    }
-  )
-}, 1500)
+// Reactive data properties
+const title = ref(null)
+const rawContent = ref(null)
+const entity = ref(null)
+const lastFetched = ref(0)
+const showComments = ref(false)
+const edited = ref(false)
 
 const saveDocument = () => {
-  if (isWritable.value || entity.value.comment) {
+  if (entity.value.write || entity.value.comment) {
     updateDocument.submit({
       entity_name: props.entityName,
       doc_name: entity.value.document,
-      title: titleVal.value,
-      content: fromUint8Array(yjsContent.value),
-      raw_content: rawContent.value,
-      settings: settings.value,
-      comments: comments.value,
-      mentions: mentionedUsers.value,
-      file_size: fromUint8Array(yjsContent.value).length,
+      content: rawContent.value,
     })
+    edited.value = true
+    return true
   }
 }
 
 const onSuccess = (data) => {
-  if (!data.settings) {
-    data.settings =
-      '{ "docWidth": false, "docSize": true, "docFont": "font-fd-sans", "docHeader": false, "docHighlightAnnotations": false, "docSpellcheck": false}'
-  }
-  settings.value = JSON.parse(data.settings)
+  window.document.title = data.title
+  updateURLSlug(data.title)
+
   store.commit("setActiveEntity", data)
-
-  if (!("docSpellcheck" in settings.value)) {
-    settings.value.docSpellcheck = 1
-  }
-  title.value = data.title
-  oldTitle.value = data.title
-  yjsContent.value = toUint8Array(data.content)
-  rawContent.value = data.raw_content
-  isWritable.value = data.owner === userId.value || !!data.write
-  store.commit("setHasWriteAccess", isWritable)
-
-  data.owner = data.owner === userId.value ? "You" : data.owner
   entity.value = data
-  lastSaved.value = Date.now()
-  contentLoaded.value = true
+  document.setData(prettyData([entity])[0])
+
+  title.value = data.title
+  rawContent.value = data.raw_content
+  showComments.value = !!entity.value.comments.length
+  lastFetched.value = Date.now()
   setBreadCrumbs(data.breadcrumbs, data.is_private, () => {
     data.write && emitter.emit("rename")
   })
 }
+
 const document = createResource({
   url: "drive.api.permissions.get_entity_with_permissions",
-  method: "GET",
   auto: true,
   params: {
     entity_name: props.entityName,
   },
   onSuccess,
-  onError() {
-    if (!store.getters.isLoggedIn) router.push({ name: "Login" })
-  },
 })
 
 const updateDocument = createResource({
   url: "drive.api.files.save_doc",
-  auto: false,
-  onSuccess() {
-    lastSaved.value = Date.now()
-    saveCount.value++
-  },
   onError(data) {
     console.log(data)
+    toast({
+      title: "There was an error.",
+      icon: LucideFileWarning,
+      text: "We can't save your file. Please contact support.",
+    })
   },
 })
 
-onMounted(() => {
-  allUsers.fetch({ team: route.params?.team })
-  if (saveCount.value > 0) {
-    intervalId.value = setInterval(() => {
-      emitter.emit("triggerAutoSnapshot")
-    }, 120000 + timeout.value)
-  }
+window.addEventListener("offline", () => {
+  toast({
+    title: "You're offline",
+    icon: LucideWifiOff,
+    text: "Don't worry, your changes will be saved locally.",
+  })
+})
+window.addEventListener("online", () => {
+  toast({ title: "Back online!", icon: h(LucideWifi) })
 })
 
-onBeforeUnmount(() => {
-  if (saveCount.value) {
-    saveDocument()
-  }
-  if (intervalId.value !== null) {
-    clearInterval(intervalId.value)
-  }
-})
+onMounted(() => allUsers.fetch({ team: route.params?.team }))
+
+onBeforeUnmount(() => edited.value && saveDocument())
 </script>

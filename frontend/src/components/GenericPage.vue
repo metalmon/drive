@@ -1,29 +1,60 @@
 <template>
   <Navbar
     v-if="!verify?.error && !getEntities.error"
-    :column-headers="$route.name === 'Recents' ? null : columnHeaders"
-    :selections="selectedEntitities"
-    :action-items="actionItems"
+    :actions="
+      $route.name === 'Folder' && verify?.data
+        ? actionItems
+            .filter((k) => k.isEnabled?.(verify.data))
+            // Remove irrelevant ones
+            .slice(1)
+            .toSpliced(4, 1)
+            .map((k) => ({ ...k, onClick: () => k.action([verify.data]) }))
+        : null
+    "
+    :trigger-root="
+      () => ((selections = new Set()), store.commit('setActiveEntity', null))
+    "
+    :root-resource="verify"
   />
-  <FolderContentsError
+
+  <ErrorPage
     v-if="verify?.error || getEntities.error"
     :error="verify?.error || getEntities.error"
   />
-  <NoFilesSection
-    v-else-if="rows?.length === 0"
-    :icon="icon"
-    :primary-message="activeFilters.length ? 'Nothing found.' : primaryMessage"
-    :secondary-message="
-      activeFilters.length ? 'Try changing filters, maybe?' : secondaryMessage
-    "
-  />
-  <template v-else>
+
+  <div
+    v-else
+    ref="container"
+    class="flex flex-col overflow-auto min-h-full bg-surface-white"
+  >
+    <DriveToolBar
+      v-if="getEntities.params?.team"
+      v-model="rows"
+      :action-items="actionItems"
+      :selections="selectedEntitities"
+      :get-entities="getEntities"
+    />
+
+    <div
+      v-if="!props.getEntities.fetched"
+      class="m-auto"
+      style="transform: translate(0, -88.5px)"
+    >
+      <LoadingIndicator class="size-10 text-ink-gray-9" />
+    </div>
+    <NoFilesSection
+      v-else-if="!props.getEntities.data?.length"
+      :icon="icon"
+      :primary-message="__(primaryMessage)"
+      :secondary-message="__(secondaryMessage)"
+    />
     <ListView
-      v-if="$store.state.view === 'list'"
+      v-else-if="$store.state.view === 'list'"
       v-model="selections"
       :folder-contents="rows && grouper(rows)"
       :action-items="actionItems"
       :user-data="userData"
+      @dropped="onDrop"
     />
     <GridView
       v-else
@@ -31,52 +62,63 @@
       :folder-contents="rows"
       :action-items="actionItems"
       :user-data="userData"
+      @dropped="onDrop"
     />
     <InfoPopup :entities="infoEntities" />
-  </template>
+  </div>
 
   <Dialogs
     v-model="dialog"
-    :selections="activeEntity ? [activeEntity] : selectedEntitities"
+    :selected-rows="activeEntity ? [activeEntity] : selectedEntitities"
+    :root-resource="verify"
     :get-entities="getEntities"
   />
-  <FileUploader v-if="$store.state.user.id" @success="getEntities.fetch()" />
+  <FileUploader
+    v-if="$store.state.user.id"
+    @success="getEntities.fetch()"
+  />
 </template>
 <script setup>
 import ListView from "@/components/ListView.vue"
 import GridView from "@/components/GridView.vue"
+import DriveToolBar from "@/components/DriveToolBar.vue"
 import Navbar from "@/components/Navbar.vue"
 import NoFilesSection from "@/components/NoFilesSection.vue"
 import Dialogs from "@/components/Dialogs.vue"
-import FolderContentsError from "@/components/FolderContentsError.vue"
+import ErrorPage from "@/components/ErrorPage.vue"
 import InfoPopup from "@/components/InfoPopup.vue"
-import { getLink } from "@/utils/getLink"
+import { getLink } from "@/utils/files"
 import { toggleFav, clearRecent } from "@/resources/files"
 import { allUsers } from "@/resources/permissions"
 import { entitiesDownload } from "@/utils/download"
-import { RotateCcw } from "lucide-vue-next"
 import FileUploader from "@/components/FileUploader.vue"
-import Team from "./EspressoIcons/Organization.vue"
-import Share from "./EspressoIcons/Share.vue"
-import Download from "./EspressoIcons/Download.vue"
-import Link from "./EspressoIcons/Link.vue"
-import Rename from "./EspressoIcons/Rename.vue"
-import Move from "./EspressoIcons/Move.vue"
-import Info from "./EspressoIcons/Info.vue"
-import Preview from "./EspressoIcons/Preview.vue"
-import Trash from "./EspressoIcons/Trash.vue"
 import { ref, computed, watch } from "vue"
 import { useRoute } from "vue-router"
 import { useStore } from "vuex"
 import { openEntity } from "@/utils/files"
-import { togglePersonal } from "@/resources/files"
 import { toast } from "@/utils/toasts"
+import { move, allFolders } from "@/resources/files"
+import { LoadingIndicator } from "frappe-ui"
+import { settings } from "@/resources/permissions"
+
+import LucideClock from "~icons/lucide/clock"
+import LucideDownload from "~icons/lucide/download"
+import LucideExternalLink from "~icons/lucide/external-link"
+import LucideEye from "~icons/lucide/eye"
+import LucideInfo from "~icons/lucide/info"
+import LucideLink2 from "~icons/lucide/link-2"
+import LucideMoveUpRight from "~icons/lucide/move-up-right"
+import LucideRotateCcw from "~icons/lucide/rotate-ccw"
+import LucideShare2 from "~icons/lucide/share-2"
+import LucideSquarePen from "~icons/lucide/square-pen"
+import LucideStar from "~icons/lucide/star"
+import LucideTrash from "~icons/lucide/trash"
 
 const props = defineProps({
   grouper: { type: Function, default: (d) => d },
   showSort: { type: Boolean, default: true },
   verify: { Object, default: null },
-  icon: Object,
+  icon: [Function, Object],
   primaryMessage: String,
   secondaryMessage: { type: String, default: "" },
   getEntities: Object,
@@ -84,32 +126,16 @@ const props = defineProps({
 const route = useRoute()
 const store = useStore()
 
-const dialog = ref(null)
+const dialog = ref("")
 const infoEntities = ref([])
-const team = route.params.team
-const sortOrder = computed(() => store.state.sortOrder)
-const activeFilters = computed(() => store.state.activeFilters)
+const team = route.params.team || localStorage.getItem("recentTeam")
 const activeEntity = computed(() => store.state.activeEntity)
-const rows = computed(() => props.getEntities.data)
-
-// We do client side sorting for immediate UI updates
-// Can't check for entity data updates as we are updating - so check for loading
+const rows = ref(props.getEntities.data)
 watch(
-  [sortOrder, () => props.getEntities.loading],
-  ([val, loading]) => {
-    if (!props.getEntities.data || loading) return
-    const field = val.field
-    const order = val.ascending ? 1 : -1
-    const sorted = props.getEntities.data.toSorted((a, b) => {
-      return a[field] == b[field] ? 0 : a[field] < b[field] ? order : -order
-    })
-    props.getEntities.setData(sorted)
-    store.commit("setCurrentFolder", {
-      name: sorted?.parent_entity || "",
-      entities: sorted.filter?.((k) => k.title[0] !== "."),
-    })
-  },
-  { immediate: true }
+  () => props.getEntities.data,
+  (val) => {
+    rows.value = val
+  }
 )
 
 const selections = ref(new Set())
@@ -121,25 +147,43 @@ const selectedEntitities = computed(
 )
 
 const verifyAccess = computed(() => props.verify?.data || !props.verify)
+
 watch(
   verifyAccess,
   async (data) => {
-    if (data)
-      await props.getEntities.fetch({
-        team,
-      })
+    if (!data) return
+
+    const sortOrder =
+      store.state.sortOrder[props.getEntities.params?.entityName]
+    const params = { team }
+    if (sortOrder)
+      params.order_by = sortOrder.field + (sortOrder.ascending ? " 1" : " 0")
+    await props.getEntities.fetch(params)
   },
   { immediate: true }
 )
 
-watch(activeFilters.value, async (val) => {
-  props.getEntities.fetch({
-    team,
-    file_kinds: JSON.stringify(val.map((k) => k.label)),
-  })
-})
+if (team) {
+  allUsers.fetch({ team })
+  allFolders.fetch({ team })
+}
+if (!settings.fetched) settings.fetch()
 
-allUsers.fetch({ team })
+// Drag and drop
+const onDrop = (targetFile, draggedItem) => {
+  if (!targetFile.is_group || draggedItem === targetFile.name || !draggedItem)
+    return
+  move.submit({
+    entity_names: [draggedItem],
+    new_parent: targetFile.name,
+  })
+  const removedIndex = props.getEntities.data.findIndex(
+    (k) => k.name === draggedItem
+  )
+  props.getEntities.data.splice(removedIndex, 1)
+  props.getEntities.data.find((k) => k.name === targetFile.name).children += 1
+  props.getEntities.setData(data)
+}
 
 // Action Items
 const actionItems = computed(() => {
@@ -147,101 +191,87 @@ const actionItems = computed(() => {
     return [
       {
         label: "Restore",
-        icon: RotateCcw,
-        onClick: () => (dialog.value = "restore"),
+        icon: LucideRotateCcw,
+        action: () => (dialog.value = "restore"),
         multi: true,
         important: true,
       },
       {
         label: "Delete forever",
-        icon: Trash,
-        onClick: () => (dialog.value = "d"),
+        icon: LucideTrash,
+        action: () => (dialog.value = "d"),
         isEnabled: () => route.name === "Trash",
         multi: true,
-        important: true,
+        danger: true,
       },
     ].filter((a) => !a.isEnabled || a.isEnabled())
   } else {
     return [
       {
-        label: "Preview",
-        icon: Preview,
-        onClick: ([entity]) => openEntity(team, entity),
+        label: __("Preview"),
+        icon: LucideEye,
+        action: ([entity]) => openEntity(team, entity),
         isEnabled: (e) => !e.is_link,
       },
       {
-        label: "Open",
-        icon: "external-link",
-        onClick: ([entity]) => openEntity(team, entity),
+        label: __("Open"),
+        icon: LucideExternalLink,
+        action: ([entity]) => openEntity(team, entity),
         isEnabled: (e) => e.is_link,
       },
+      { divider: true },
       {
-        label: "Download",
-        icon: Download,
-        isEnabled: (e) => !e.is_link,
-        onClick: (entities) => entitiesDownload(team, entities),
-        multi: true,
-        important: true,
-      },
-      {
-        label: "Share",
-        icon: Share,
-        onClick: () => (dialog.value = "s"),
+        label: __("Share"),
+        icon: LucideShare2,
+        action: () => (dialog.value = "s"),
         isEnabled: (e) => e.share,
         important: true,
       },
       {
-        label: "Get Link",
-        icon: Link,
-        onClick: ([entity]) => getLink(entity),
+        label: __("Download"),
+        icon: LucideDownload,
+        isEnabled: (e) => !e.is_link,
+        action: (entities) => entitiesDownload(team, entities),
+        multi: true,
         important: true,
       },
       {
-        label: "Rename",
-        icon: Rename,
-        onClick: () => (dialog.value = "rn"),
-        isEnabled: (e) => e.write,
+        label: __("Copy Link"),
+        icon: LucideLink2,
+        action: ([entity]) => getLink(entity),
+        important: true,
       },
+      { divider: true },
       {
-        label: "Move",
-        icon: Move,
-        onClick: () => (dialog.value = "m"),
+        label: __("Move"),
+        icon: LucideMoveUpRight,
+        action: () => (dialog.value = "m"),
         isEnabled: (e) => e.write,
         multi: true,
         important: true,
       },
       {
-        label: "Move to Team",
-        icon: Team,
-        onClick: (entities) =>
-          confirm(
-            `Are you sure you want to move ${entities.length} ${
-              entities.length === 1 ? "item" : "items"
-            } to the team?`
-          ) &&
-          entities.map((e) =>
-            togglePersonal.submit({ entity_name: e.name, new_value: 0 })
-          ),
-        isEnabled: () => route.name == "Home",
-        multi: true,
-        important: true,
+        label: __("Rename"),
+        icon: LucideSquarePen,
+        action: () => (dialog.value = "rn"),
+        isEnabled: (e) => e.write,
       },
       {
-        label: "Show Info",
-        icon: Info,
-        onClick: () => infoEntities.value.push(store.state.activeEntity),
+        label: __("Show Info"),
+        icon: LucideInfo,
+        action: () => infoEntities.value.push(store.state.activeEntity),
         isEnabled: () => !store.state.activeEntity || !store.state.showInfo,
       },
       {
-        label: "Hide Info",
-        icon: Info,
-        onClick: () => (dialog.value = "info"),
+        label: __("Hide Info"),
+        icon: LucideInfo,
+        action: () => (dialog.value = "info"),
         isEnabled: () => store.state.activeEntity && store.state.showInfo,
       },
       {
-        label: "Favourite",
-        icon: "star",
-        onClick: (entities) => {
+        label: __("Favourite"),
+        icon: LucideStar,
+        action: (entities) => {
           entities.forEach((e) => (e.is_favourite = true))
           // Hack to cache
           props.getEntities.setData(props.getEntities.data)
@@ -252,10 +282,10 @@ const actionItems = computed(() => {
         multi: true,
       },
       {
-        label: "Unfavourite",
-        icon: "star",
+        label: __("Unfavourite"),
+        icon: LucideStar,
         class: "stroke-amber-500 fill-amber-500",
-        onClick: (entities) => {
+        action: (entities) => {
           entities.forEach((e) => (e.is_favourite = false))
           props.getEntities.setData(props.getEntities.data)
           toggleFav.submit({ entities })
@@ -265,9 +295,9 @@ const actionItems = computed(() => {
         multi: true,
       },
       {
-        label: "Remove from Recents",
-        icon: "clock",
-        onClick: (entities) => {
+        label: __("Remove from Recents"),
+        icon: LucideClock,
+        action: (entities) => {
           clearRecent.submit({
             entities,
           })
@@ -276,49 +306,21 @@ const actionItems = computed(() => {
         important: true,
         multi: true,
       },
+      { divider: true, isEnabled: (e) => e.write },
       {
-        label: "Unshare",
-        danger: true,
-        icon: "trash-2",
-        onClick: () => (dialog.value = "unshare"),
-        isEnabled: (e) =>
-          e.owner != "You" && e.user_doctype === "User" && e.everyone !== 1,
-      },
-      {
-        label: "Move to Trash",
-        icon: Trash,
-        onClick: () => (dialog.value = "remove"),
+        label: __("Delete"),
+        icon: LucideTrash,
+        action: () => (dialog.value = "remove"),
         isEnabled: (e) => e.write,
         important: true,
         multi: true,
         danger: true,
+        theme: "blue",
       },
     ]
   }
 })
 
-const columnHeaders = [
-  {
-    label: "Name",
-    field: "title",
-  },
-  {
-    label: "Owner",
-    field: "owner",
-  },
-  {
-    label: "Modified",
-    field: "modified",
-  },
-  {
-    label: "Size",
-    field: "file_size",
-  },
-  {
-    label: "Type",
-    field: "mime_type",
-  },
-]
 const userData = computed(() =>
   allUsers.data ? Object.fromEntries(allUsers.data.map((k) => [k.name, k])) : {}
 )
@@ -328,30 +330,28 @@ async function newLink() {
   try {
     const text = await navigator.clipboard.readText()
     if (localStorage.getItem("prevClip") === text) return
-    new URL(text)
     localStorage.setItem("prevClip", text)
-    toast({
-      title: "Link detected",
-      text,
-      buttons: [
-        {
-          label: "Add",
-          action: () => {
-            dialog.value = "l"
+    url = new URL(text)
+    if (url.host)
+      toast({
+        title: "Link detected",
+        text,
+        buttons: [
+          {
+            label: "Add",
+            action: () => {
+              dialog.value = "l"
+            },
           },
-        },
-      ],
-    })
+        ],
+      })
   } catch (_) {}
 }
 
-// Hacky but performant way to track links - when the user loads page, copies on page, or comes to page
 // JS doesn't allow direct reading of clipboard
-newLink()
-addEventListener("copy", () => document.getElementById("popovers").click())
-document.getElementById("popovers").addEventListener("click", newLink)
-document.addEventListener("visibilitychange", () => {
-  window.focus()
-  !document.hidden && setTimeout(newLink, 100)
-})
+if (settings.data?.auto_detect_links) {
+  newLink()
+  window.addEventListener("focus", newLink)
+  window.addEventListener("copy", newLink)
+}
 </script>
