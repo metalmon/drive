@@ -38,8 +38,6 @@ const getFolderContents = createResource({
   url: "drive.api.list.files",
   makeParams: (params) => ({
     ...params,
-    // Disable all checks, return all children
-    personal: -2,
     entity_name: props.entityName,
     team: props.team,
   }),
@@ -47,6 +45,7 @@ const getFolderContents = createResource({
 })
 setCache(getFolderContents, ["folder", props.entityName])
 
+// BROKEN
 onMounted(() => {
   realtime.doc_subscribe("Drive File", props.entityName)
   realtime.doc_open("Drive File", props.entityName)
@@ -75,7 +74,6 @@ const onSuccess = (entity) => {
 const e = computed(() => props.entityName)
 let currentFolder = createResource({
   url: "drive.api.permissions.get_entity_with_permissions",
-  makeParams: (e) => ({ entity_name: e }),
   transform(entity) {
     return prettyData([entity])[0]
   },
@@ -84,7 +82,8 @@ let currentFolder = createResource({
     if (!store.getters.isLoggedIn) router.push({ name: "Login" })
   },
 })
-watch(e, (v) => currentFolder.fetch(v), { immediate: true })
+store.commit("setCurrentResource", currentFolder)
+watch(e, (v) => currentFolder.fetch({ entity_name: v }), { immediate: true })
 
 let userInfo = createResource({
   url: "frappe.desk.form.load.get_user_info_for_viewers",

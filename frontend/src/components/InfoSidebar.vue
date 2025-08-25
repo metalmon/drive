@@ -59,7 +59,7 @@
                 v-if="$store.state.activeEntity?.share"
                 :variant="'subtle'"
                 class="rounded flex justify-center items-center"
-                @click="emitter.emit('showShareDialog')"
+                @click="emitter.emit('share')"
               >
                 {{ __("Manage") }}
               </Button>
@@ -256,7 +256,6 @@ import { formatDate } from "@/utils/format"
 import GeneralAccess from "@/components/GeneralAccess.vue"
 import { getThumbnailUrl } from "@/utils/getIconUrl"
 import ActivityTree from "./ActivityTree.vue"
-import TagInput from "@/components/TagInput.vue"
 import { generalAccess, userList } from "@/resources/permissions"
 import LucideMessageCircle from "~icons/lucide/message-circle"
 

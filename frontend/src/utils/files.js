@@ -10,6 +10,8 @@ import editorStyle from "@/components/DocEditor/editor.css?inline"
 import globalStyle from "@/index.css?inline"
 import slugify from "slugify"
 import { toast } from "@/utils/toasts.js"
+import { useFileUpload, toast as nToast } from "frappe-ui"
+import emitter from "@/emitter"
 
 // MIME icons
 import Folder from "@/components/MimeIcons/Folder.vue"
@@ -511,4 +513,170 @@ export function dynamicList(k) {
 
 export const setTitle = (title) =>
   (document.title =
-    (router.currentRoute.name === "Folder" ? "Folder - " : "") + title)
+    (router.currentRoute.value.name === "Folder" ? "Folder - " : "") + title)
+
+async function uploadImage(file, params) {
+  const uploader = useFileUpload()
+  const upload = uploader.upload(file, {
+    params,
+    upload_endpoint: "/api/method/drive.api.files.upload_file",
+  })
+  let entity = await new Promise((resolve) => {
+    upload.then((data) => {
+      resolve(data)
+    })
+  })
+
+  return entity
+}
+
+export const pasteObj = (e) => {
+  const clipboardItems = Array.from(e.clipboardData?.items || [])
+  if (clipboardItems.some((item) => item.type.includes("image"))) {
+    e.preventDefault()
+    const file = clipboardItems
+      .find((item) => item.type.includes("image"))
+      ?.getAsFile()
+    if (file) {
+      const route = router.currentRoute.value
+      const entity = uploadImage(file, {
+        team: route.params.team,
+        parent: route.params.entityName || "",
+        personal: store.state.breadcrumbs[0].name === "Home" ? 1 : 0,
+        total_file_size: file.size,
+        last_modified: file.lastModified,
+      })
+      nToast.promise(entity, {
+        loading: "Uploading...",
+        success: () => {
+          emitter.emit("refresh")
+          return "Uploaded"
+        },
+        error: () => "Failed to upload",
+        duration: 500,
+      })
+    }
+  }
+}
+
+export const FONT_FAMILIES = [
+  {
+    label: "Caveat",
+    value: "caveat",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-caveat)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-caveat)",
+      }),
+  },
+  {
+    label: "Comic Sans",
+    value: "comic-sans",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-comic-sans)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-comic-sans)",
+      }),
+  },
+  {
+    label: "Comfortaa",
+    value: "comfortaa",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-comfortaa)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-comfortaa)",
+      }),
+  },
+  {
+    label: "EB Garamond",
+    value: "eb-garamond",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-eb-garamond)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-eb-garamond)",
+      }),
+  },
+  {
+    label: "Fantasy",
+    value: "fantasy",
+    action: (editor) => editor.chain().focus().setFontFamily("fantasy").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "fantasy",
+      }),
+  },
+  {
+    label: "Geist",
+    value: "geist",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-geist)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-geist)",
+      }),
+  },
+  {
+    label: "IBM Plex Sans",
+    value: "ibm-plex",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-ibm-plex)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-ibm-plex)",
+      }),
+  },
+  {
+    label: "Inter",
+    value: "inter",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-inter)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-inter)",
+      }),
+  },
+  {
+    label: "JetBrains Mono",
+    value: "jetbrains",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-jetbrains)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-jetbrains)",
+      }),
+  },
+  {
+    label: "Lora",
+    value: "lora",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-lora)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-lora)",
+      }),
+  },
+  {
+    label: "Merriweather",
+    value: "merriweather",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-merriweather)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-merriweather)",
+      }),
+  },
+  {
+    label: "Nunito",
+    value: "nunito",
+    action: (editor) =>
+      editor.chain().focus().setFontFamily("var(--font-nunito)").run(),
+    isActive: (editor) =>
+      editor.isActive("textStyle", {
+        fontFamily: "var(--font-nunito)",
+      }),
+  },
+]

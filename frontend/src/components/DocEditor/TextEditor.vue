@@ -5,16 +5,17 @@
         $event.target.tagName === 'DIV' &&
           textEditor.editor?.chain?.().focus?.().run?.()
       "
-      class="mx-auto cursor-text min-h-[100vh]"
-      :class="
-        showComments
-          ? 'w-[90%] sm:px-[2.5rem] sm:w-[60%] md:px-0'
-          : 'w-[90%] sm:w-[80%]'
-      "
+      class="mx-auto cursor-text min-h-full w-full md:w-auto ps-4 md:p-0"
     >
       <FTextEditor
         ref="textEditor"
-        editor-class="prose-sm min-h-[4rem] p-5"
+        class="min-w-full md:min-w-[65ch]"
+        :editor-class="[
+          'prose-sm min-h-[4rem]',
+          `text-[${writerSettings.doc?.font_size || 15}px]`,
+          `leading-[${writerSettings.doc?.line_height || 1.5}]`,
+          writerSettings.doc?.custom_css,
+        ]"
         :content="rawContent"
         :editable="!!entity.write"
         :upload-function="
@@ -48,7 +49,7 @@
       v-if="comments.length"
       :entity="entity"
       :editor
-      :show-comments
+      v-model:show-comments="showComments"
       v-model:active-comment="activeComment"
       v-model:comments="comments"
     />
@@ -57,7 +58,12 @@
 
 <script setup>
 import { toast } from "@/utils/toasts.js"
-import { TextEditor as FTextEditor, debounce, useFileUpload } from "frappe-ui"
+import {
+  TextEditor as FTextEditor,
+  debounce,
+  useFileUpload,
+  useDoc,
+} from "frappe-ui"
 import { v4 as uuidv4 } from "uuid"
 import {
   computed,
@@ -71,13 +77,13 @@ import {
 import store from "@/store"
 import FontFamily from "./extensions/font-family"
 import FloatingQuoteButton from "./extensions/comment"
+import { CharacterCount } from "./extensions/character-count"
 import CommentExtension from "@sereneinserenade/tiptap-comment-extension"
 import FloatingComments from "./components/FloatingComments.vue"
 import { printDoc } from "@/utils/files"
 import { rename } from "@/resources/files"
 import { onKeyDown } from "@vueuse/core"
 import emitter from "@/emitter"
-import { uploadDriveEntity } from "@/utils/chunkFileUpload"
 
 import H1 from "./icons/h-1.vue"
 import H2 from "./icons/h-2.vue"
@@ -88,8 +94,10 @@ import LucideMessageCircle from "~icons/lucide/message-circle"
 const textEditor = ref("textEditor")
 const editor = computed(() => {
   let editor = textEditor.value?.editor
+
   return editor
 })
+defineExpose({ editor })
 
 const rawContent = defineModel("rawContent")
 const showComments = defineModel("showComments")
@@ -97,7 +105,7 @@ const edited = defineModel("edited")
 
 const props = defineProps({
   entity: Object,
-  showComments: Boolean,
+  showResolved: Boolean,
   users: Object,
 })
 const comments = ref([])
@@ -106,6 +114,19 @@ const emit = defineEmits(["updateTitle", "saveDocument", "mentionedUsers"])
 const activeComment = ref(null)
 const autosave = debounce(() => emit("saveDocument"), 2000)
 
+const writerSettings = useDoc({
+  doctype: "Drive Settings",
+  name: store.state.user.id,
+  immediate: true,
+})
+writerSettings.onSuccess(({ font_family }) => {
+  if (!rawContent.value)
+    editor.value
+      .chain()
+      .focus()
+      .setFontFamily(`var(--font-${font_family})`)
+      .run()
+})
 const createNewComment = (editor) => {
   showComments.value = true
   const id = uuidv4()
@@ -183,6 +204,7 @@ const ExtendedCommentExtension = CommentExtension.extend({
 })
 
 const editorExtensions = [
+  CharacterCount,
   FontFamily.configure({
     types: ["textStyle"],
   }),
@@ -192,12 +214,11 @@ const editorExtensions = [
     },
   }),
   ExtendedCommentExtension.configure({
-    HTMLAttributes: {
-      class: "",
-    },
     onCommentActivated: (id) => {
-      if (id) {
+      let isResolved = comments.value.find((k) => id === k.name)?.resolved
+      if (id && (!isResolved || showResolved)) {
         activeComment.value = id
+        showComments.value = true
         document.querySelector(`span[data-comment-id="${id}"]`).scrollIntoView({
           behavior: "smooth",
           block: "start",
@@ -362,7 +383,6 @@ function evalImplicitTitle() {
   if (implicitTitle.length === 0) return
 
   if (implicitTitle.length) {
-    store.state.activeEntity.title = implicitTitle
     rename.submit({
       entity_name: props.entity.name,
       new_title: implicitTitle,

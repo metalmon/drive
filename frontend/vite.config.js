@@ -17,9 +17,6 @@ export default defineConfig({
     }),
     vue(),
   ],
-  define: {
-    "process.env.IS_PREACT": JSON.stringify("true"),
-  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
@@ -47,15 +44,9 @@ export default defineConfig({
   optimizeDeps: {
     esbuildOptions: { target: "esnext" },
     include: [
-      "lucide-static",
-      "feather-icons",
-      "tailwind.config.js",
-      "lowlight",
-      "grid-layout-plus",
-      "prosemirror-state",
-      "prosemirror-transform",
-      "prosemirror-model",
-      "prosemirror-view",
+      "frappe-ui > feather-icons",
+      "frappe-ui > lowlight",
+      "frappe-ui > interactjs",
     ],
   },
 })

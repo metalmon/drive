@@ -1,20 +1,25 @@
+import shutil
+from pathlib import Path
+
 import frappe
 from frappe.model.document import Document
-from pathlib import Path
-import shutil
-from drive.utils.files import (
-    get_home_folder,
-    get_new_title,
-    get_team_thumbnails_directory,
-    update_file_size,
-    FileManager,
-)
-from drive.api.files import get_ancestors_of
-from drive.utils.files import generate_upward_path
+from frappe.utils import now
+
 from drive.api.activity import create_new_activity_log
+from drive.api.files import get_new_title
+from drive.api.permissions import user_has_permission
+from drive.utils import generate_upward_path, get_ancestors_of, get_home_folder, update_file_size
+from drive.utils.files import FileManager
 
 
 class DriveFile(Document):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    @property
+    def manager(self):
+        return FileManager()
+
     def after_insert(self):
         full_name = frappe.db.get_value("User", {"name": frappe.session.user}, ["full_name"])
         message = f"{full_name} created {self.title}"
@@ -35,12 +40,7 @@ class DriveFile(Document):
 
         if self.is_group or self.document:
             for child in self.get_children():
-                has_write_access = frappe.has_permission(
-                    doctype="Drive File",
-                    doc=self,
-                    ptype="write",
-                    user=frappe.session.user,
-                )
+                has_write_access = user_has_permission(self, "write")
                 child.delete(ignore_permissions=has_write_access)
 
     def after_delete(self):
@@ -49,8 +49,7 @@ class DriveFile(Document):
             frappe.delete_doc("Drive Document", self.document)
 
         if self.path:
-            manager = FileManager()
-            manager.delete_file(self.team, self.name, self.path)
+            self.manager.delete_file(self.team, self.name, self.path)
 
     def on_rollback(self):
         if self.flags.file_created:
@@ -64,6 +63,15 @@ class DriveFile(Document):
         for name in child_names:
             yield frappe.get_doc(self.doctype, name)
 
+    def __update(func):
+        def decorator(self, *args, **kwargs):
+            res = func(self, *args, **kwargs)
+            frappe.db.set_value("Drive File", self.name, "_modified", now())
+            return res
+
+        return decorator
+
+    @__update
     def move(self, new_parent=None, is_private=None):
         """
         Move file or folder to the new parent folder
@@ -75,25 +83,18 @@ class DriveFile(Document):
         :return: DriveEntity doc once file is moved
         """
         new_parent = new_parent or get_home_folder(self.team).name
-        if new_parent == self.parent_entity:
-            if is_private is not None:
-                self.is_private = int(is_private)
-                self.save()
-            return frappe.get_value(
-                "Drive File",
-                self.parent_entity,
-                ["title", "team", "name", "is_private"],
-                as_dict=True,
-            )
+        if is_private is None:
+            is_private = frappe.db.get_value("Drive File", new_parent, "is_private")
+
+        if new_parent == self.parent_entity and self.is_private == is_private:
+            return
 
         if new_parent == self.name:
             frappe.throw(
                 "Cannot move into itself",
                 frappe.PermissionError,
             )
-
-        is_group = frappe.db.get_value("Drive File", new_parent, "is_group")
-        if not is_group:
+        if not frappe.db.get_value("Drive File", new_parent, "is_group"):
             raise NotADirectoryError()
 
         for child in self.get_children():
@@ -108,16 +109,23 @@ class DriveFile(Document):
                     ["title", "team", "name", "is_private"],
                     as_dict=True,
                 )
+            else:
+                child.move(self.name, is_private)
 
-        update_file_size(self.parent_entity, -self.file_size)
-        update_file_size(new_parent, +self.file_size)
+        if new_parent != self.parent_entity:
+            update_file_size(self.parent_entity, -self.file_size)
+            update_file_size(new_parent, +self.file_size)
+            self.parent_entity = new_parent
 
-        self.parent_entity = new_parent
-        self.is_private = frappe.db.get_value("Drive File", new_parent, "is_private")
+        self.title = get_new_title(self.title, new_parent, self.is_group, is_private)
+        self.is_private = is_private
 
-        title = get_new_title(self.title, new_parent)
-        if title != self.title:
-            self.rename(title)
+        # Condition is so that old file names aren't corrupted
+        if not self.manager.flat and not self.document:
+            new_path = self.manager.get_disk_path(self)
+            self.manager.move(self.path, new_path)
+            self.path = new_path
+
         self.save()
 
         return frappe.get_value(
@@ -146,12 +154,7 @@ class DriveFile(Document):
             parent_is_group = frappe.db.get_value("Drive File", new_parent, "is_group")
             if not parent_is_group:
                 raise NotADirectoryError()
-            if not frappe.has_permission(
-                doctype="Drive File",
-                doc=new_parent,
-                ptype="write",
-                user=frappe.session.user,
-            ):
+            if not user_has_permission(new_parent, "upload"):
                 frappe.throw(
                     "Cannot paste to this folder due to insufficient permissions",
                     frappe.PermissionError,
@@ -240,6 +243,7 @@ class DriveFile(Document):
                 )
 
     @frappe.whitelist()
+    @__update
     def rename(self, new_title):
         """
         Rename file or folder
@@ -261,14 +265,15 @@ class DriveFile(Document):
             }
         )
 
-        # Only exception
-        if entity_exists and new_title != "Untitled Document":
-            suggested_name = get_new_title(new_title, self.parent_entity, folder=self.is_group)
-            frappe.throw(
-                f"{'Folder' if self.is_group else 'File'} '{new_title}' already exists\n Try '{suggested_name}' ",
+        validated_name = get_new_title(
+            new_title, self.parent_entity, self.is_group, self.is_private
+        )
+        if new_title != validated_name and new_title != "Untitled Document":
+            return frappe.throw(
+                f"{'Folder' if self.is_group else 'File'} '{new_title}' already exists\n Try '{validated_name}' ",
                 FileExistsError,
             )
-            return suggested_name
+
         full_name = frappe.db.get_value("User", {"name": frappe.session.user}, ["full_name"])
         message = f"{full_name} renamed {self.title} to {new_title}"
         create_new_activity_log(
@@ -280,6 +285,7 @@ class DriveFile(Document):
             field_new_value=new_title,
         )
         self.title = new_title
+        self.path = self.manager.rename(self)
         self.save()
         return self
 
@@ -296,28 +302,9 @@ class DriveFile(Document):
             "Drive File", self.name, "color", new_color, update_modified=False
         )
 
-    @frappe.whitelist()
-    def toggle_personal(self, new_value, move_root=True):
-        """
-        Toggle is private for file
-        """
-        # BROKEN: don't allow personal unless whole breadcrumb is personal
-        self.is_private = new_value
-        if not new_value and move_root:
-            self.move()
-        if self.is_group:
-            for child in self.get_children():
-                child.toggle_personal(new_value, False)
-        self.save()
-        return self.name
-
     def permanent_delete(self):
-        write_access = frappe.has_permission(doctype="Drive File", doc=self, ptype="write")
-        parent_write_access = frappe.has_permission(
-            doctype="Drive File",
-            doc=frappe.get_value("Drive File", self, "parent_entity"),
-            ptype="write",
-        )
+        write_access = user_has_permission(self, "write")
+        parent_write_access = user_has_permission(self.parent_entity, "write")
 
         if not (write_access or parent_write_access):
             frappe.throw("Not permitted", frappe.PermissionError)
@@ -349,12 +336,7 @@ class DriveFile(Document):
         :param share: 1 if share permission is to be granted. Defaults to 0
         """
         if frappe.session.user != self.owner:
-            if not frappe.has_permission(
-                doctype="Drive File",
-                doc=self,
-                ptype="share",
-                user=frappe.session.user,
-            ):
+            if not user_has_permission(self, "share"):
                 for owner in get_ancestors_of(self.name):
                     if frappe.session.user == frappe.get_value(
                         "Drive File", {"name": owner}, ["owner"]
@@ -363,6 +345,18 @@ class DriveFile(Document):
                     else:
                         frappe.throw("Not permitted to share", frappe.PermissionError)
                         break
+
+        if not user or user == "$TEAM":
+            perm_names = frappe.db.get_list(
+                "Drive Permission",
+                {
+                    "user": ["in", ["", "$TEAM"]],
+                    "entity": self.name,
+                },
+                pluck="name",
+            )
+            for perm_name in perm_names:
+                frappe.delete_doc("Drive Permission", perm_name, ignore_permissions=True)
 
         permission = frappe.db.get_value(
             "Drive Permission",
@@ -397,6 +391,7 @@ class DriveFile(Document):
     @frappe.whitelist()
     def unshare(self, user=None):
         """Unshare this file or folder with the specified user
+        # BROKEN - poorly implemented, perm check
 
         :param user: User or group with whom this is to be shared
         :param user_type:
@@ -405,16 +400,27 @@ class DriveFile(Document):
         for i in absolute_path:
             if i["owner"] == user:
                 frappe.throw("User owns parent folder", frappe.PermissionError)
-
-        perm_name = frappe.db.get_value(
-            "Drive Permission",
-            {
-                "user": user,
-                "entity": self.name,
-            },
-        )
-        if perm_name:
-            frappe.delete_doc("Drive Permission", perm_name, ignore_permissions=True)
+        if user == "$GENERAL":
+            perm_names = frappe.db.get_list(
+                "Drive Permission",
+                {
+                    "user": ["in", ["", "$TEAM"]],
+                    "entity": self.name,
+                },
+                pluck="name",
+            )
+            for perm_name in perm_names:
+                frappe.delete_doc("Drive Permission", perm_name, ignore_permissions=True)
+        else:
+            perm_name = frappe.db.get_value(
+                "Drive Permission",
+                {
+                    "user": user,
+                    "entity": self.name,
+                },
+            )
+            if perm_name:
+                frappe.delete_doc("Drive Permission", perm_name, ignore_permissions=True)
 
 
 def on_doctype_update():

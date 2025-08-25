@@ -117,16 +117,12 @@
               onClick: () => activeFilters.push(k),
             }))
           "
+          :button="{
+            icon: LucideFilter,
+            tooltip: 'Filter',
+          }"
           placement="right"
-        >
-          <Tooltip text="Filter">
-            <Button :disabled="!getEntities.data?.length">
-              <template #icon>
-                <LucideFilter class="size-4" />
-              </template>
-            </Button>
-          </Tooltip>
-        </Dropdown>
+        />
         <Dropdown
           v-if="$route.name !== 'Recents'"
           :options="orderByItems"
@@ -151,10 +147,15 @@
             </Button>
 
             <Button
-              class="text-sm h-7 rounded-l-none flex-1 md:block"
+              class="text-sm h-7 rounded-l-none flex-1"
               :disabled="!getEntities.data?.length"
             >
-              {{ __(sortOrder.label) }}
+              <div class="flex items-center gap-2">
+                {{ __(sortOrder.label) }}
+                <template v-if="sortOrder.smart">
+                  <LucideSparkles class="size-3" />
+                </template>
+              </div>
             </Button>
           </div>
         </Dropdown>
@@ -189,21 +190,20 @@
             )"
           :key="item.label"
         >
-          <Tooltip :text="item.label">
-            <Button
-              variant="outline"
-              size="md"
-              @click.once="item.action(selections)"
-            >
-              <template #icon>
-                <component
-                  :is="item.icon"
-                  class="size-4 text-ink-gray-6"
-                  :class="[item.class, item.danger ? 'text-ink-red-3' : '']"
-                />
-              </template>
-            </Button>
-          </Tooltip>
+          <Button
+            variant="outline"
+            :tooltip="item.label"
+            size="md"
+            @click.once="item.action(selections)"
+          >
+            <template #icon>
+              <component
+                :is="item.icon"
+                class="size-4 text-ink-gray-6"
+                :class="[item.class, item.theme ? 'text-ink-red-3' : '']"
+              />
+            </template>
+          </Button>
         </template>
       </div>
     </div>
@@ -230,8 +230,7 @@ import {
 import { ICON_TYPES, MIME_LIST_MAP, sortEntities } from "@/utils/files"
 import { useStore } from "vuex"
 import { onKeyDown } from "@vueuse/core"
-import LucideLayoutGrid from "~icons/lucide/layout-grid"
-import LucideLayoutList from "~icons/lucide/layout-list"
+import LucideFilter from "~icons/lucide/filter"
 
 const rows = defineModel(Array)
 const props = defineProps({
@@ -345,7 +344,7 @@ const columnHeaders = [
           setup() {
             return () =>
               h(Switch, {
-                label: __("Smart sort"),
+                label: __("Smart"),
                 disabled: sortOrder.field !== "title",
                 modelValue: sortOrder.smart,
                 "onUpdate:modelValue": (val) => (sortOrder.smart = val),

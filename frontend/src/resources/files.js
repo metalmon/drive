@@ -1,7 +1,6 @@
-import { createResource } from "frappe-ui"
+import { createResource, toast as nToast } from "frappe-ui"
 import { toast } from "@/utils/toasts"
 import { openEntity, setTitle } from "@/utils/files"
-
 import store from "@/store"
 import router from "@/router"
 import { prettyData, setCache } from "@/utils/files"
@@ -73,6 +72,15 @@ export const getFavourites = createResource({
   },
 })
 
+export const getDocuments = createResource({
+  ...COMMON_OPTIONS,
+  url: "drive.api.list.files",
+  makeParams: (params) => {
+    return { ...params, file_kinds: '["Frappe Document"]' }
+  },
+  cache: "document-folder-contents",
+})
+
 export const getShared = createResource({
   ...COMMON_OPTIONS,
   url: "drive.api.list.shared",
@@ -114,8 +122,8 @@ export const mutate = (entities, func) => {
   )
 }
 
-export const updateMoved = (new_parent, team) => {
-  if (new_parent && team) {
+export const updateMoved = (team, new_parent, special) => {
+  if (!special) {
     // All details are repetetively provided (check Folder.vue) because if this is run first
     // No further mutation of the resource object can take place
     createResource({
@@ -128,11 +136,15 @@ export const updateMoved = (new_parent, team) => {
         team,
       }),
       cache: ["folder", new_parent],
-    }).fetch({
-      order_by:
-        store.state.sortOrder.field +
-        (store.state.sortOrder.ascending ? " 1" : " 0"),
-    })
+    }).fetch(
+      store.state.sortOrder[new_parent]
+        ? {
+            order_by:
+              store.state.sortOrder[new_parent].field +
+              (store.state.sortOrder[new_parent].ascending ? " 1" : " 0"),
+          }
+        : {}
+    )
   } else {
     ;(move.params.is_private ? getPersonal : getHome).fetch({ team })
   }
@@ -184,11 +196,11 @@ export const clearRecent = createResource({
       entity_names,
     }
   },
-  onSuccess: () => {
-    const files = clearRecent.params.entity_names?.length
-    toast(
-      `Removed  ${files || "all"} file${files === 1 ? "" : "s"} from Recents.`
-    )
+  onError: () => {
+    toast({
+      message: "There was an error while clearing recents.",
+      type: "error",
+    })
   },
 })
 
@@ -208,6 +220,15 @@ export const clearTrash = createResource({
       `Permanently deleted ${files || "all"} file${files === 1 ? "" : "s"}.`
     )
   },
+  onError(error) {
+    toast({
+      title: "There was an error",
+      description: JSON.stringify(error),
+      position: "bottom-right",
+      type: "error",
+      timeout: 2,
+    })
+  },
 })
 
 export const rename = createResource({
@@ -223,16 +244,16 @@ export const rename = createResource({
     let l = store.state.breadcrumbs[store.state.breadcrumbs.length - 1]
     if (l.name === rename.params.entity_name) {
       l.label = rename.params.new_title
+      store.state.activeEntity.title = rename.params.new_title
       setTitle(rename.params.new_title)
+      updateURLSlug(rename.params.new_title)
     }
-    updateURLSlug(rename.params.new_title)
   },
   onError(error) {
     toast({
-      title: JSON.stringify(error).includes("FileExistsError")
-        ? "There is already a file with this name!"
-        : "There was an error",
+      title: error.messages[0],
       position: "bottom-right",
+      type: "error",
       timeout: 2,
     })
   },
@@ -244,24 +265,6 @@ export const createDocument = createResource({
   makeParams: (params) => params,
 })
 
-export const togglePersonal = createResource({
-  method: "POST",
-  url: "drive.api.files.call_controller_method",
-  makeParams: (params) => ({ ...params, method: "toggle_personal" }),
-  onSuccess: (e) => {
-    let index = getPersonal.data.findIndex((k) => k.name === e)
-    getHome.setData((data) => {
-      data.push(getPersonal.data[index])
-      return data
-    })
-
-    getPersonal.setData((data) => {
-      data.splice(index, 1)
-      return data
-    })
-  },
-})
-
 export const move = createResource({
   url: "drive.api.files.move",
   onSuccess(data) {
@@ -270,23 +273,25 @@ export const move = createResource({
       buttons: [
         {
           label: "Go",
-          action: () => {
-            openEntity(null, {
-              name: data.name,
-              team: data.team,
-              is_group: true,
-              is_private: data.is_private,
-            })
+          onClick: () => {
+            if (!data.special)
+              openEntity(null, {
+                name: data.name,
+                team: data.team,
+                is_group: true,
+                is_private: data.is_private,
+              })
+            else router.push({ name: data.title })
           },
         },
       ],
     })
 
     // Update moved-into folder
-    updateMoved(data.name, data.team, data.is_private)
+    updateMoved(data.team, data.name, data.special)
   },
   onError() {
-    toast("There was an error.")
+    toast({ title: "There was an error.", type: "error" })
   },
 })
 
@@ -322,3 +327,4 @@ setCache(getRecents, "recents-folder-contents")
 setCache(getFavourites, "favourite-folder-contents")
 setCache(getPersonal, "personal-folder-contents")
 setCache(getTrash, "trash-folder-contents")
+setCache(getDocuments, "document-folder-contents")

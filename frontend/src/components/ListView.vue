@@ -1,7 +1,7 @@
 <template>
   <FrappeListView
     ref="container"
-    class="relative select-none p-5"
+    class="relative select-none p-5 md:pb-15"
     row-key="name"
     :columns="selectedColumns"
     :rows="formattedRows"
@@ -27,10 +27,7 @@
       <LoadingIndicator class="w-8" />
     </div>
     <template v-else>
-      <div
-        id="drop-area"
-        class="h-full overflow-y-auto"
-      >
+      <div class="h-full overflow-y-auto">
         <ListEmptyState v-if="!formattedRows.length" />
         <div
           v-for="group in formattedRows"
@@ -48,21 +45,23 @@
             <CustomListRow
               :rows="group.rows"
               :context-menu="contextMenu"
+              :selections
               @dropped="emit('dropped')"
             />
           </ListGroupRows>
         </div>
-        <div v-else="formattedRows.length">
+        <div
+          v-else="formattedRows.length"
+          class="pb-8"
+        >
           <CustomListRow
             :rows="formattedRows"
             :context-menu="contextMenu"
+            :selections
             @dropped="(...p) => $emit('dropped', ...p)"
           />
         </div>
       </div>
-      <p class="hidden absolute text-center w-full top-[50%] z-10 font-bold">
-        Drop to upload
-      </p>
     </template>
   </FrappeListView>
   <ContextMenu
@@ -242,7 +241,6 @@ const contextMenu = (event, row) => {
   if (event.ctrlKey) openEntity(route.params.team, row, true)
   rowEvent.value = event
   selectedRow.value = row
-  console.log(selectedRow.value)
   event.stopPropagation()
   event.preventDefault()
 }
@@ -297,14 +295,3 @@ onKeyDown("Escape", (e) => {
   e.preventDefault()
 })
 </script>
-<style>
-.dz-drag-hover #drop-area {
-  opacity: 0.5;
-  padding-left: 0;
-  padding-right: 0;
-}
-
-.dz-drag-hover #drop-area + p {
-  display: block;
-}
-</style>

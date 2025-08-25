@@ -2,7 +2,7 @@
   <div
     v-show="showComments"
     ref="scrollContainer"
-    class="relative hidden sm:flex w-80 border-s-2 flex-col gap-8 justify-start self-stretch pb-5 bg-surface-white"
+    class="relative hidden md:flex min-w-80 border-s-2 flex-col gap-8 justify-start self-stretch pb-5 bg-surface-white"
   >
     <template
       v-for="comment in filteredComments"
@@ -125,9 +125,10 @@
                 class="w-full flex justify-between items-start label-group gap-1 text-sm"
               >
                 <div class="flex gap-1">
-                  <label class="font-medium text-ink-gray-8">{{
-                    $user(reply.owner)?.full_name
-                  }}</label>
+                  <label
+                    class="font-medium text-ink-gray-8 max-w-[70%] truncate"
+                    >{{ $user(reply.owner)?.full_name }}</label
+                  >
 
                   <label class="text-ink-gray-6 truncate">
                     &#183;
@@ -175,9 +176,8 @@
                     "
                     variant="ghost"
                     @click="triggerRoot"
-                  >
-                    <LucideMoreVertical class="size-3" />
-                  </Button>
+                    :icon="h(LucideMoreVertical, { class: 'size-3' })"
+                  />
                 </Dropdown>
                 <LucideBadgeCheck
                   v-if="comment.resolved"
@@ -271,6 +271,12 @@
       class="text-large text-ink-gray-9 font-semibold w-80 px-3 py-2 bg-white dark:bg-black bg-opacity-70 fixed"
     >
       Comments
+      <Button
+        :icon="LucideX"
+        variant="ghost"
+        class="float-right"
+        @click="showComments = false"
+      />
     </div>
   </div>
 </template>
@@ -282,6 +288,7 @@ import {
   inject,
   onMounted,
   ref,
+  h,
   onBeforeUnmount,
   nextTick,
   defineAsyncComponent,
@@ -293,6 +300,8 @@ import { v4 } from "uuid"
 import { useDebounceFn, useEventListener } from "@vueuse/core"
 import { toast } from "@/utils/toasts"
 import LucideMessageCircleWarning from "~icons/lucide/message-circle-warning"
+import LucideX from "~icons/lucide/x"
+import LucideMoreVertical from "~icons/lucide/more-vertical"
 import { useStore } from "vuex"
 
 const CommentEditor = defineAsyncComponent(() =>
@@ -301,13 +310,13 @@ const CommentEditor = defineAsyncComponent(() =>
 const props = defineProps({
   entity: Object,
   editor: Object,
-  showComments: Boolean,
 })
 
 const store = useStore()
 
 const activeComment = defineModel("activeComment")
 const comments = defineModel("comments")
+const showComments = defineModel("showComments")
 const scrollContainer = ref("scrollContainer")
 
 const newReplies = reactive({})
@@ -325,14 +334,23 @@ const findComment = (name) => {
 
 const showResolved = inject("showResolved")
 const filteredComments = computed(() => {
-  if (showResolved.value) {
+  const filtered = showResolved.value
+    ? comments.value
+    : comments.value.filter((k) => !k.resolved)
+  if (!filtered.length) showComments.value = false
+  return filtered
+})
+watch(showResolved, async (val) => {
+  await nextTick()
+  if (val) {
     document
       .querySelectorAll("[data-resolved=true]")
       .forEach((k) => k.classList.add("display"))
+  } else {
+    document
+      .querySelectorAll("[data-resolved=true]")
+      .forEach((k) => k.classList.remove("display"))
   }
-  return showResolved.value
-    ? comments.value
-    : comments.value.filter((k) => !k.resolved)
 })
 watch(activeComment, (val) => {
   document
@@ -349,7 +367,7 @@ watch(activeComment, (val) => {
 
 // Resources
 const createComment = createResource({
-  url: "drive.api.files.create_comment",
+  url: "drive.api.docs.create_comment",
   onSuccess: () => {
     findComment(createComment.params.name).loading = false
   },
@@ -361,13 +379,13 @@ const createComment = createResource({
   },
 })
 const editComment = createResource({
-  url: "drive.api.files.edit_comment",
+  url: "drive.api.docs.edit_comment",
 })
 const deleteComment = createResource({
-  url: "drive.api.files.delete_comment",
+  url: "drive.api.docs.delete_comment",
 })
 const resolveComment = createResource({
-  url: "drive.api.files.resolve_comment",
+  url: "drive.api.docs.resolve_comment",
 })
 
 // Functions

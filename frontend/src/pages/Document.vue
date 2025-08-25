@@ -22,16 +22,19 @@
         {
           icon: MessageSquareDot,
           label: 'Show Resolved',
-          onClick: () => (showResolved = true),
+          onClick: () => {
+            showResolved = true
+            showComments = true
+          },
           isEnabled: () => !showResolved,
-          cond: entity?.comments?.length,
+          cond: entity?.comments?.filter((k) => k.resolved)?.length,
         },
         {
           icon: MessageSquareDot,
           label: 'Hide Resolved',
           onClick: () => (showResolved = false),
           isEnabled: () => showResolved,
-          cond: entity?.comments?.length,
+          cond: entity?.comments?.filter((k) => k.resolved)?.length,
         },
       ])
     "
@@ -45,7 +48,10 @@
     :error="document.error"
     class="w-10 h-full text-neutral-100 mx-auto"
   />
-  <div class="flex w-full overflow-auto">
+  <div
+    v-else
+    class="flex w-full h-full overflow-auto"
+  >
     <TextEditor
       v-if="entity"
       ref="editor"
@@ -54,7 +60,7 @@
       v-model:show-comments="showComments"
       :entity="entity"
       :users="allUsers.data || []"
-      :show-comments
+      :show-resolved
       @save-document="saveDocument"
     />
   </div>
@@ -69,6 +75,8 @@ import {
   defineAsyncComponent,
   provide,
   onBeforeUnmount,
+  h,
+  computed,
 } from "vue"
 import { useRoute } from "vue-router"
 import { useStore } from "vuex"
@@ -83,6 +91,7 @@ import LucideWifi from "~icons/lucide/wifi"
 import LucideWifiOff from "~icons/lucide/wifi-off"
 import LucideFileWarning from "~icons/lucide/file-warning"
 import { dynamicList } from "../utils/files"
+import { useTemplateRef } from "vue"
 
 const TextEditor = defineAsyncComponent(() =>
   import("@/components/DocEditor/TextEditor.vue")
@@ -98,6 +107,11 @@ const store = useStore()
 const route = useRoute()
 const emitter = inject("emitter")
 const showResolved = ref(false)
+const editor = useTemplateRef("editor")
+provide(
+  "editor",
+  computed(() => editor.value.editor)
+)
 provide("showResolved", showResolved)
 
 // Reactive data properties
@@ -124,13 +138,12 @@ const onSuccess = (data) => {
   window.document.title = data.title
   updateURLSlug(data.title)
 
-  store.commit("setActiveEntity", data)
+  document.setData(prettyData([data])[0])
   entity.value = data
-  document.setData(prettyData([entity])[0])
+  store.commit("setActiveEntity", data)
 
   title.value = data.title
   rawContent.value = data.raw_content
-  showComments.value = !!entity.value.comments.length
   lastFetched.value = Date.now()
   setBreadCrumbs(data.breadcrumbs, data.is_private, () => {
     data.write && emitter.emit("rename")
@@ -145,11 +158,12 @@ const document = createResource({
   },
   onSuccess,
 })
+store.commit("setCurrentResource", document)
 
 const updateDocument = createResource({
   url: "drive.api.files.save_doc",
-  onError(data) {
-    console.log(data)
+  onError(error) {
+    console.log(error)
     toast({
       title: "There was an error.",
       icon: LucideFileWarning,

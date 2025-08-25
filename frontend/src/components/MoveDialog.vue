@@ -1,13 +1,11 @@
 <template>
   <Dialog
     v-model="open"
-    :options="{ size: '2xl' }"
+    @close="dialogType = ''"
+    :options="{ size: 'lg' }"
   >
     <template #body-main>
-      <div
-        v-focus
-        class="py-5 px-4 sm:px-6"
-      >
+      <div class="p-4 sm:px-6">
         <div class="flex w-full justify-between gap-x-15 mb-4">
           <div class="font-semibold text-2xl flex text-nowrap overflow-hidden">
             <template v-if="props.entities.length > 1">
@@ -24,14 +22,14 @@
           <Button
             class="ml-auto"
             variant="ghost"
-            @click="$emit('update:modelValue', false)"
+            @click="dialogType = ''"
           >
             <template #icon>
               <LucideX class="size-4" />
             </template>
           </Button>
         </div>
-        <Autocomplete
+        <!-- <Combobox
           v-if="allFolders.data"
           v-model="folderSearch"
           class="mb-2"
@@ -43,16 +41,14 @@
                 : k.value !== currentFolder
             )
           "
-        >
-          <template #suffix-icon>&#8203;</template>
-        </Autocomplete>
+        /> -->
         <Tabs
           v-model="tabIndex"
           as="div"
           :tabs="tabs"
         >
           <template #tab-panel>
-            <div class="py-1 h-40 overflow-auto">
+            <div class="py-1 h-64 overflow-auto">
               <Tree
                 v-for="k in tree.children"
                 :key="k.value"
@@ -64,7 +60,7 @@
                 >
                   <div
                     class="flex items-center cursor-pointer select-none gap-1 h-7"
-                    @click="openEntity(node)"
+                    @click="openEntity(node.value)"
                   >
                     <div
                       ref="iconRef"
@@ -145,12 +141,15 @@
                   </div>
                 </template>
               </Tree>
-              <p
+              <div
                 v-if="!tree.children.length"
-                class="text-base text-center pt-5"
+                class="text-base flex justify-center h-full"
               >
-                No folders yet.
-              </p>
+                <div class="self-center text-ink-gray-6 flex flex-col gap-2">
+                  <LucideFolderClosed class="size-6 self-center" />
+                  No folders found
+                </div>
+              </div>
             </div>
           </template>
         </Tabs>
@@ -205,17 +204,10 @@
               currentFolder === '' && breadcrumbs[0].title == $route.name
             "
             :loading="move.loading"
-            @click="
-              $emit('success'),
-                move.submit({
-                  entity_names: entities.map((obj) => obj.name),
-                  new_parent: currentFolder,
-                  is_private: breadcrumbs[breadcrumbs.length - 1].is_private,
-                })
-            "
+            @click="moveFile"
           >
             <template #prefix>
-              <LucideMoveUpRight class="size-4" />
+              <LucideArrowLeftRight class="size-4" />
             </template>
             Move
           </Button>
@@ -233,7 +225,6 @@ import {
   Button,
   Tabs,
   Dropdown,
-  Autocomplete,
   Tree,
   Input,
 } from "frappe-ui"
@@ -245,22 +236,22 @@ import LucideBuilding2 from "~icons/lucide/building-2"
 import LucideChevronDown from "~icons/lucide/chevron-down"
 import LucideFolder from "~icons/lucide/folder"
 import LucideHome from "~icons/lucide/home"
-import LucideMoveUpRight from "~icons/lucide/move-up-right"
+import LucideArrowLeftRight from "~icons/lucide/arrow-left-right"
 
 const route = useRoute()
-const currentFolder = ref("")
-const emit = defineEmits(["update:modelValue", "success"])
+
+const emit = defineEmits(["success", "complete"])
 const props = defineProps({
-  modelValue: {
-    type: String,
-    required: true,
-  },
   entities: {
     type: Object,
     required: false,
     default: null,
   },
 })
+const dialogType = defineModel()
+const open = ref(true)
+
+const currentFolder = ref("")
 
 const homeMap = {}
 const teamMap = {}
@@ -275,14 +266,17 @@ const homeRoot = reactive({
   name: "",
   label: "Home",
   children: [],
-  isCollapsed: true,
+  options: {
+    isCollapsed: true,
+  },
 })
-
 const teamRoot = reactive({
   name: "",
   label: "Team",
   children: [],
-  isCollapsed: true,
+  options: {
+    isCollapsed: true,
+  },
 })
 
 allFolders.data.forEach((item) => {
@@ -300,15 +294,6 @@ const store = useStore()
 const in_home = store.state.breadcrumbs[0].name == "Home"
 const tabIndex = ref(in_home ? 0 : 1)
 const tree = ref(tabIndex.value === 0 ? homeRoot : teamRoot)
-
-const open = computed({
-  get() {
-    return props.modelValue === "m"
-  },
-  set(newValue) {
-    emit("update:modelValue", newValue || "")
-  },
-})
 
 const slicedBreadcrumbs = computed(() => {
   if (breadcrumbs.value.length > 3) {
@@ -347,7 +332,7 @@ const tabs = [
 const breadcrumbs = ref([
   { name: "", title: in_home ? "Home" : "Team", is_private: in_home ? 1 : 0 },
 ])
-const folderSearch = ref(null)
+const folderSearch = ref("")
 
 const folderPermissions = createResource({
   url: "drive.api.permissions.get_entity_with_permissions",
@@ -425,8 +410,8 @@ const createFolder = createResource({
 })
 
 function openEntity(node) {
-  if (store.state.currentFolder.name === node.value) return
-  if (!node.value) {
+  if (store.state.currentFolder.name === node) return
+  if (!node) {
     createdNode.value = node
     createFolder.fetch({
       title: node.label,
@@ -434,7 +419,7 @@ function openEntity(node) {
       parent: node.parent,
     })
   } else {
-    currentFolder.value = node.value
+    currentFolder.value = node
     folderPermissions.fetch({
       entity_name: currentFolder.value,
     })
@@ -460,11 +445,7 @@ const expandNode = (obj, name) => {
 
 watch(folderSearch, (val) => {
   if (!val) return
-  tree.value = val.is_private ? homeRoot : teamRoot
-  tabIndex.value = val.is_private ? 0 : 1
-  expandNode(tree.value, val.value)
-
-  currentFolder.value = val.value
+  expandNode(tree.value, val)
   openEntity(val)
 })
 
@@ -478,5 +459,16 @@ function closeEntity(name) {
       personal: currentFolder.value === "" ? 1 : -1,
     })
   }
+}
+
+const moveFile = async () => {
+  open.value = false
+  emit("success")
+  await move.submit({
+    entity_names: props.entities.map((obj) => obj.name),
+    new_parent: currentFolder.value,
+    is_private: breadcrumbs.value[breadcrumbs.value.length - 1].is_private,
+  })
+  emit("complete")
 }
 </script>

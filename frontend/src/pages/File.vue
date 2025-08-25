@@ -11,25 +11,21 @@
       />
       <div
         v-else
-        class="flex-grow w-full flex justify-center"
+        id="renderContainer"
+        :draggable="false"
+        class="w-full p-10 md:px-32 flex-grow w-full flex justify-center align-center items-center"
       >
-        <div
-          id="renderContainer"
-          :draggable="false"
-          class="h-full w-full md:w-4/5 flex justify-center py-10 align-center items-center"
-        >
-          <LoadingIndicator
-            v-if="file.loading"
-            class="w-10 h-full text-neutral-100"
-          />
-          <FileRender
-            v-else-if="file.data"
-            :preview-entity="file.data"
-          />
-        </div>
+        <LoadingIndicator
+          v-if="file.loading"
+          class="w-10 h-full text-neutral-100"
+        />
+        <FileRender
+          v-else-if="file.data"
+          :preview-entity="file.data"
+        />
       </div>
       <div
-        class="hidden sm:flex absolute bottom-4 left-1/2 transform -translate-x-1/2 w-fit items-center justify-center p-1 gap-1 h-10 rounded-lg shadow-xl bg-surface-white"
+        class="hidden sm:flex absolute bottom-4 left-1/2 transform -translate-x-1/2 w-fit items-center justify-center p-1 gap-1 rounded shadow-xl l bg-surface-white"
       >
         <Button
           :disabled="!prevEntity?.name"
@@ -41,7 +37,7 @@
           :variant="'ghost'"
           @click="enterFullScreen"
         >
-          <LucideScan class="w-4" />
+          <LucideScan class="size-4" />
         </Button>
         <Button
           :disabled="!nextEntity?.name"
@@ -51,8 +47,6 @@
         />
       </div>
     </div>
-
-    <InfoSidebar />
   </div>
 </template>
 
@@ -80,7 +74,6 @@ import {
   updateURLSlug,
 } from "@/utils/files"
 import ErrorPage from "@/components/ErrorPage.vue"
-import InfoSidebar from "@/components/InfoSidebar.vue"
 
 const router = useRouter()
 const store = useStore()
@@ -110,6 +103,11 @@ const nextEntity = computed(() => filteredEntities.value[index.value + 1])
 
 function fetchFile(currentEntity) {
   file.fetch({ entity_name: currentEntity })
+  router.push({
+    params: {
+      entityName: currentEntity,
+    },
+  })
 }
 
 onKeyStroke("ArrowLeft", (e) => {

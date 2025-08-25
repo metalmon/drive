@@ -5,7 +5,7 @@
     @click="emitter.emit('showSettings', 2)"
   >
     <SidebarItem
-      :label="props.isExpanded ? __('Storage') : '- used out of 5GB'"
+      :label="__('Storage')"
       :is-collapsed="!props.isExpanded"
     >
       <template #icon>
@@ -27,12 +27,8 @@
       />
     </div>
     <span
-      class="mx-2 text-xs text-ink-gray-5 transition-all duration-500 ease-in-out line-clamp-1"
-      :class="
-        isExpanded
-          ? 'ml-2 w-auto opacity-100 h-auto'
-          : 'ml-0 w-0 overflow-hidden opacity-0 h-0'
-      "
+      class="text-xs text-ink-gray-5 line-clamp-1 ml-2"
+      :class="isExpanded ? 'opacity-100' : 'opacity-0'"
       >{{ formattedString }}</span
     >
   </div>
@@ -54,7 +50,7 @@ const storageMax = ref(5368709120)
 const props = defineProps(["isExpanded"])
 const formattedString = computed(() => {
   return (
-    (formatSize(usedStorage.value) || "-") +
+    formatSize(usedStorage.value) +
     " used out of " +
     base2BlockSize(storageMax.value)
   )

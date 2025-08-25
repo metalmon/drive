@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router"
 import store from "./store"
 import { manageBreadcrumbs } from "./utils/files"
 import { createResource } from "frappe-ui"
+import { getTeams } from "./resources/files"
 
 function clearStore() {
   store.commit("setActiveEntity", null)
@@ -20,6 +21,7 @@ async function setRootBreadCrumb(to) {
 const routes = [
   {
     path: "/",
+    name: "Base",
     component: () => null,
     beforeEnter: async () => {
       if (!store.getters.isLoggedIn) return "/login"
@@ -50,7 +52,7 @@ const routes = [
     props: true,
   },
   {
-    path: "/t/:team/notifications",
+    path: "/t/:team/inbox",
     name: "Inbox",
     // Load a skeleton template directly?
     component: () => import("@/pages/Notifications.vue"),
@@ -63,6 +65,13 @@ const routes = [
     beforeEnter: [setRootBreadCrumb],
     props: true,
   },
+
+  {
+    path: "/t/:team/trash",
+    name: "Trash",
+    component: () => import("@/pages/Trash.vue"),
+    beforeEnter: [setRootBreadCrumb],
+  },
   {
     path: "/t/:team/recents",
     name: "Recents",
@@ -70,15 +79,15 @@ const routes = [
     beforeEnter: [setRootBreadCrumb],
   },
   {
-    path: "/t/:team/favourites",
-    name: "Favourites",
-    component: () => import("@/pages/Favourites.vue"),
+    path: "/t/:team/documents",
+    name: "Documents",
+    component: () => import("@/pages/Documents.vue"),
     beforeEnter: [setRootBreadCrumb],
   },
   {
-    path: "/t/:team/trash",
-    name: "Trash",
-    component: () => import("@/pages/Trash.vue"),
+    path: "/t/:team/favourites",
+    name: "Favourites",
+    component: () => import("@/pages/Favourites.vue"),
     beforeEnter: [setRootBreadCrumb],
   },
   {

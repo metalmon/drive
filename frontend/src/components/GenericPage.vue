@@ -1,20 +1,8 @@
 <template>
   <Navbar
     v-if="!verify?.error && !getEntities.error"
-    :actions="
-      $route.name === 'Folder' && verify?.data
-        ? actionItems
-            .filter((k) => k.isEnabled?.(verify.data))
-            // Remove irrelevant ones
-            .slice(1)
-            .toSpliced(4, 1)
-            .map((k) => ({ ...k, onClick: () => k.action([verify.data]) }))
-        : null
-    "
-    :trigger-root="
-      () => ((selections = new Set()), store.commit('setActiveEntity', null))
-    "
     :root-resource="verify"
+    :entities="activeEntity ? [activeEntity] : selectedEntitities"
   />
 
   <ErrorPage
@@ -25,22 +13,22 @@
   <div
     v-else
     ref="container"
+    id="drop-area"
     class="flex flex-col overflow-auto min-h-full bg-surface-white"
   >
     <DriveToolBar
-      v-if="getEntities.params?.team"
       v-model="rows"
       :action-items="actionItems"
       :selections="selectedEntitities"
-      :get-entities="getEntities"
+      :get-entities="getEntities || { data: [] }"
     />
 
     <div
-      v-if="!props.getEntities.fetched"
+      v-if="!props.getEntities.data"
       class="m-auto"
       style="transform: translate(0, -88.5px)"
     >
-      <LoadingIndicator class="size-10 text-ink-gray-9" />
+      <LoadingIndicator class="size-5 text-ink-gray-9" />
     </div>
     <NoFilesSection
       v-else-if="!props.getEntities.data?.length"
@@ -64,18 +52,13 @@
       :user-data="userData"
       @dropped="onDrop"
     />
-    <InfoPopup :entities="infoEntities" />
   </div>
-
-  <Dialogs
-    v-model="dialog"
-    :selected-rows="activeEntity ? [activeEntity] : selectedEntitities"
-    :root-resource="verify"
-    :get-entities="getEntities"
-  />
+  <p class="hidden absolute text-center w-full top-[50%] z-10 font-bold">
+    Drop to upload
+  </p>
   <FileUploader
     v-if="$store.state.user.id"
-    @success="getEntities.fetch()"
+    @success="getEntities.fetch"
   />
 </template>
 <script setup>
@@ -84,16 +67,15 @@ import GridView from "@/components/GridView.vue"
 import DriveToolBar from "@/components/DriveToolBar.vue"
 import Navbar from "@/components/Navbar.vue"
 import NoFilesSection from "@/components/NoFilesSection.vue"
-import Dialogs from "@/components/Dialogs.vue"
 import ErrorPage from "@/components/ErrorPage.vue"
-import InfoPopup from "@/components/InfoPopup.vue"
-import { getLink } from "@/utils/files"
+import { getLink, pasteObj } from "@/utils/files"
 import { toggleFav, clearRecent } from "@/resources/files"
 import { allUsers } from "@/resources/permissions"
 import { entitiesDownload } from "@/utils/download"
 import FileUploader from "@/components/FileUploader.vue"
-import { ref, computed, watch } from "vue"
+import { ref, computed, watch, watchEffect, provide } from "vue"
 import { useRoute } from "vue-router"
+import { useEventListener } from "@vueuse/core"
 import { useStore } from "vuex"
 import { openEntity } from "@/utils/files"
 import { toast } from "@/utils/toasts"
@@ -107,12 +89,13 @@ import LucideExternalLink from "~icons/lucide/external-link"
 import LucideEye from "~icons/lucide/eye"
 import LucideInfo from "~icons/lucide/info"
 import LucideLink2 from "~icons/lucide/link-2"
-import LucideMoveUpRight from "~icons/lucide/move-up-right"
+import LucideArrowLeftRight from "~icons/lucide/arrow-left-right"
 import LucideRotateCcw from "~icons/lucide/rotate-ccw"
 import LucideShare2 from "~icons/lucide/share-2"
 import LucideSquarePen from "~icons/lucide/square-pen"
 import LucideStar from "~icons/lucide/star"
 import LucideTrash from "~icons/lucide/trash"
+import emitter from "../emitter"
 
 const props = defineProps({
   grouper: { type: Function, default: (d) => d },
@@ -127,7 +110,7 @@ const route = useRoute()
 const store = useStore()
 
 const dialog = ref("")
-const infoEntities = ref([])
+provide("dialog", dialog)
 const team = route.params.team || localStorage.getItem("recentTeam")
 const activeEntity = computed(() => store.state.activeEntity)
 const rows = ref(props.getEntities.data)
@@ -137,6 +120,8 @@ watch(
     rows.value = val
   }
 )
+store.commit("setListResource", props.getEntities)
+store.commit("setCurrentResource", null)
 
 const selections = ref(new Set())
 const selectedEntitities = computed(
@@ -147,21 +132,26 @@ const selectedEntitities = computed(
 )
 
 const verifyAccess = computed(() => props.verify?.data || !props.verify)
+watchEffect(() => {
+  if (verifyAccess.value?.write) useEventListener("paste", pasteObj)
+})
 
+const refreshData = () => {
+  const sortOrder = store.state.sortOrder[props.getEntities.params?.entityName]
+  const params = { team }
+  if (sortOrder)
+    params.order_by = sortOrder.field + (sortOrder.ascending ? " 1" : " 0")
+  props.getEntities.fetch(params)
+}
 watch(
   verifyAccess,
-  async (data) => {
+  (data) => {
     if (!data) return
-
-    const sortOrder =
-      store.state.sortOrder[props.getEntities.params?.entityName]
-    const params = { team }
-    if (sortOrder)
-      params.order_by = sortOrder.field + (sortOrder.ascending ? " 1" : " 0")
-    await props.getEntities.fetch(params)
+    refreshData()
   },
-  { immediate: true }
+  { immediate: true, deep: false }
 )
+emitter.on("refresh", refreshData)
 
 if (team) {
   allUsers.fetch({ team })
@@ -244,7 +234,7 @@ const actionItems = computed(() => {
       { divider: true },
       {
         label: __("Move"),
-        icon: LucideMoveUpRight,
+        icon: LucideArrowLeftRight,
         action: () => (dialog.value = "m"),
         isEnabled: (e) => e.write,
         multi: true,
@@ -259,14 +249,8 @@ const actionItems = computed(() => {
       {
         label: __("Show Info"),
         icon: LucideInfo,
-        action: () => infoEntities.value.push(store.state.activeEntity),
+        action: () => (dialog.value = "i"),
         isEnabled: () => !store.state.activeEntity || !store.state.showInfo,
-      },
-      {
-        label: __("Hide Info"),
-        icon: LucideInfo,
-        action: () => (dialog.value = "info"),
-        isEnabled: () => store.state.activeEntity && store.state.showInfo,
       },
       {
         label: __("Favourite"),
@@ -314,8 +298,7 @@ const actionItems = computed(() => {
         isEnabled: (e) => e.write,
         important: true,
         multi: true,
-        danger: true,
-        theme: "blue",
+        theme: "red",
       },
     ]
   }
@@ -331,7 +314,7 @@ async function newLink() {
     const text = await navigator.clipboard.readText()
     if (localStorage.getItem("prevClip") === text) return
     localStorage.setItem("prevClip", text)
-    url = new URL(text)
+    const url = new URL(text)
     if (url.host)
       toast({
         title: "Link detected",
@@ -339,7 +322,7 @@ async function newLink() {
         buttons: [
           {
             label: "Add",
-            action: () => {
+            onClick: () => {
               dialog.value = "l"
             },
           },
@@ -355,3 +338,14 @@ if (settings.data?.auto_detect_links) {
   window.addEventListener("copy", newLink)
 }
 </script>
+<style>
+.dz-drag-hover #drop-area {
+  opacity: 0.5;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.dz-drag-hover #drop-area + p {
+  display: block;
+}
+</style>

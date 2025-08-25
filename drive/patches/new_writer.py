@@ -1,8 +1,9 @@
-import frappe
-import pycrdt
 import base64
 from datetime import datetime
 from uuid import uuid4
+
+import frappe
+import pycrdt
 
 
 def execute():

@@ -2,11 +2,11 @@
   <nav
     ondragstart="return false;"
     ondrop="return false;"
-    class="bg-surface-white border-b w-full px-5 py-2.5 h-12 flex items-center justify-between"
+    class="bg-surface-white border-b px-5 py-2.5 h-12 flex items-center justify-between"
   >
     <Breadcrumbs
       :items="store.state.breadcrumbs"
-      :class="'select-none'"
+      class="select-none truncate"
     >
       <template #prefix="{ item, index }">
         <LoadingIndicator
@@ -37,21 +37,31 @@
         height="16"
         class="my-auto stroke-amber-500 fill-amber-500"
       />
-      <Dropdown
-        v-if="dropdownAction"
-        :options="dropdownAction"
-        placement="left"
-      >
+      <template v-if="!isLoggedIn">
         <Button
-          variant="ghost"
-          @click="triggerRoot"
+          label="Download"
+          variant="outline"
+          @click="entitiesDownload($route.params.team, [rootEntity])"
+        />
+        <Button
+          variant="solid"
+          @click="$router.push({ name: 'Login' })"
         >
-          <LucideMoreHorizontal
-            name="more-horizontal"
-            class="size-4"
-          />
+          Sign In
         </Button>
-      </Dropdown>
+      </template>
+      <Dropdown
+        v-else-if="defaultActions"
+        :options="defaultActions"
+        placement="right"
+        :button="{
+          variant: 'ghost',
+          onClick: () => {
+            $store.commit('setActiveEntity', rootEntity)
+          },
+          icon: LucideMoreHorizontal,
+        }"
+      />
 
       <Dropdown
         v-if="
@@ -59,23 +69,18 @@
           isLoggedIn &&
           props.rootResource?.data?.write !== false
         "
+        :button="{
+          variant: 'solid',
+          icon: LucidePlus,
+        }"
         :options="newEntityOptions"
         placement="right"
-        class="basis-5/12 lg:basis-auto"
-      >
-        <Button variant="solid">
-          <div class="flex">
-            <LucidePlus class="size-4" />
-          </div>
-        </Button>
-      </Dropdown>
+      />
       <Button
         v-if="button"
-        class="line-clamp-1 truncate w-full"
         :disabled="!button.entities.data?.length"
-        variant="subtle"
         :theme="button.theme || 'gray'"
-        @click="emitter.emit('showCTADelete')"
+        @click="dialog = 'cta-' + $route.name.toLowerCase()"
       >
         <template #prefix>
           <component
@@ -85,46 +90,32 @@
         </template>
         {{ button.label }}
       </Button>
-
-      <div
-        v-if="connectedUsers.length > 1 && isLoggedIn"
-        class="hidden sm:flex bg-surface-gray-3 rounded justify-center items-center px-1"
-      >
-        <UsersBar />
-      </div>
-
-      <div
-        v-if="!isLoggedIn"
-        class="ml-auto"
-      >
-        <Button
-          variant="solid"
-          @click="$router.push({ name: 'Login' })"
-        >
-          Sign In
-        </Button>
-      </div>
     </div>
+    <Button
+      v-if="!isLoggedIn"
+      class="fixed bottom-4 right-4 text-sm"
+      variant="outline"
+      :icon-left="h(FrappeDriveLogo, { class: 'w-4.5 h-4.5' })"
+      label="Try out Drive"
+      @click="open('https://frappe.io/drive')"
+    />
     <Dialogs
-      v-if="$route.name === 'File' || $route.name === 'Document'"
       v-model="dialog"
-      :root-resource
+      :entities="entities?.length ? entities : [rootEntity]"
     />
   </nav>
 </template>
 <script setup>
-import UsersBar from "./UsersBar.vue"
 import {
   Button,
   Breadcrumbs,
   LoadingIndicator,
   Dropdown,
-  Tooltip,
-  Switch,
+  toast,
 } from "frappe-ui"
 import { useStore } from "vuex"
 import emitter from "@/emitter"
-import { ref, computed } from "vue"
+import { ref, computed, inject, h } from "vue"
 import { entitiesDownload } from "@/utils/download"
 import {
   getRecents,
@@ -132,9 +123,10 @@ import {
   getTrash,
   createDocument,
   toggleFav,
+  getDocuments,
 } from "@/resources/files"
 import { useRoute, useRouter } from "vue-router"
-import { getLink } from "@/utils/files"
+import { getLink, prettyData } from "@/utils/files"
 
 import LucideClock from "~icons/lucide/clock"
 import LucideHome from "~icons/lucide/home"
@@ -142,16 +134,19 @@ import LucideTrash from "~icons/lucide/trash"
 import LucideUsers from "~icons/lucide/users"
 import LucideBuilding2 from "~icons/lucide/building-2"
 import LucideStar from "~icons/lucide/star"
+import LucideMoreHorizontal from "~icons/lucide/more-horizontal"
 import LucideShare2 from "~icons/lucide/share-2"
 import LucideDownload from "~icons/lucide/download"
+import LucidePlus from "~icons/lucide/plus"
 import LucideLink from "~icons/lucide/link"
-import LucideMoveUpRight from "~icons/lucide/move-up-right"
+import LucideArrowLeftRight from "~icons/lucide/arrow-left-right"
 import LucideSquarePen from "~icons/lucide/square-pen"
 import LucideInfo from "~icons/lucide/info"
 import LucideFileUp from "~icons/lucide/file-up"
 import LucideFolderUp from "~icons/lucide/folder-up"
 import LucideFilePlus2 from "~icons/lucide/file-plus-2"
 import LucideFolderPlus from "~icons/lucide/folder-plus"
+import FrappeDriveLogo from "./FrappeDriveLogo.vue"
 
 const COMPONENT_MAP = {
   Home: LucideHome,
@@ -164,18 +159,27 @@ const COMPONENT_MAP = {
 const store = useStore()
 const route = useRoute()
 const router = useRouter()
+const open = (url) => {
+  window.open(url, "_blank")
+}
 
 const props = defineProps({
-  actions: Array,
-  triggerRoot: Function,
   rootResource: Object,
+  actions: { type: Array, required: false },
+  // Used to pass into dialogs
+  entities: {
+    type: Array,
+    default: [],
+  },
 })
-const isLoggedIn = computed(() => store.getters.isLoggedIn)
-const connectedUsers = computed(() => store.state.connectedUsers)
-const dialog = ref("")
-const rootEntity = computed(() => props.rootResource?.data)
 
-const dropdownAction = computed(() => {
+const isLoggedIn = computed(() => store.getters.isLoggedIn)
+const dialog = inject("dialog", ref(""))
+const rootEntity = computed(
+  () => props.rootResource?.data?.title && props.rootResource?.data
+)
+
+const defaultActions = computed(() => {
   if (!rootEntity.value?.title) return
   let actions = []
   if (props.actions) {
@@ -190,7 +194,9 @@ const dropdownAction = computed(() => {
         {
           label: __("Share"),
           icon: LucideShare2,
-          onClick: () => (dialog.value = "s"),
+          onClick: () => {
+            dialog.value = "s"
+          },
           isEnabled: () => rootEntity.value.share,
         },
         {
@@ -212,7 +218,7 @@ const dropdownAction = computed(() => {
       items: [
         {
           label: __("Move"),
-          icon: LucideMoveUpRight,
+          icon: LucideArrowLeftRight,
           onClick: () => (dialog.value = "m"),
           isEnabled: () => rootEntity.value.write,
         },
@@ -225,14 +231,8 @@ const dropdownAction = computed(() => {
         {
           label: __("Show Info"),
           icon: LucideInfo,
-          onClick: () => infoEntities.value.push(store.state.activeEntity),
+          onClick: () => (dialog.value = "i"),
           isEnabled: () => !store.state.activeEntity || !store.state.showInfo,
-        },
-        {
-          label: __("Hide Info"),
-          icon: LucideInfo,
-          onClick: () => (dialog.value = "info"),
-          isEnabled: () => store.state.activeEntity && store.state.showInfo,
         },
         {
           label: __("Favourite"),
@@ -280,18 +280,32 @@ const dropdownAction = computed(() => {
 
 // Functions
 const newDocument = async () => {
-  let data = await createDocument.submit({
-    title: "Untitled Document",
-    team: route.params.team,
-    personal: store.state.breadcrumbs[0].name === "Home" ? 1 : 0,
-    content: null,
-    parent: store.state.currentFolder.name,
-  })
-  window.open(
-    router.resolve({
-      name: "Document",
-      params: { team: route.params.team, entityName: data.name },
-    }).href
+  toast.promise(
+    createDocument.submit({
+      title: "Untitled Document",
+      team: route.params.team,
+      personal: store.state.breadcrumbs[0].name === "Home" ? 1 : 0,
+      content: null,
+      parent: store.state.currentFolder.name,
+    }),
+    {
+      successDuration: 1,
+      loading: "Creating document...",
+      success: (data) => {
+        prettyData([data])
+        data.file_type = "Document"
+        store.state.listResource.data?.push?.(data)
+        getDocuments.data?.push(data)
+        window.open(
+          router.resolve({
+            name: "Document",
+            params: { team: route.params.team, entityName: data.name },
+          }).href
+        )
+        return "Created"
+      },
+      error: "Failed to create document",
+    }
   )
 }
 
@@ -348,13 +362,12 @@ const newEntityOptions = [
       {
         label: "Folder",
         icon: LucideFolderPlus,
-        onClick: () => emitter.emit("newFolder"),
+        onClick: () => (dialog.value = "f"),
       },
-
       {
         label: "New Link",
         icon: LucideLink,
-        onClick: () => emitter.emit("newLink"),
+        onClick: () => (dialog.value = "l"),
       },
     ],
   },

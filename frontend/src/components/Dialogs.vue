@@ -1,5 +1,5 @@
 <template>
-  <!-- New item dialogs -->
+  <!-- New dialogs -->
   <NewFolderDialog
     v-if="dialog === 'f'"
     v-model="dialog"
@@ -7,102 +7,106 @@
     @success="(data) => addToList(data, 'Folder')"
   />
   <NewLinkDialog
-    v-if="dialog === 'l'"
+    v-else-if="dialog === 'l'"
     v-model="dialog"
     :parent="$route.params.entityName"
     @success="(data) => addToList(data, 'Link')"
   />
-  <!-- Mutation dialog -->
+
+  <!-- Mutation dialogs -->
   <RenameDialog
-    v-if="dialog === 'rn'"
+    v-else-if="dialog === 'rn'"
     v-model="dialog"
-    :entity="selections[0]"
+    :entity="entities[0]"
     @success="
       ({ name, title }) => {
-        if (selections[0] !== rootResource?.data && props.getEntities)
-          props.getEntities.data.find((k) => k.name === name).title = title
+        const el = listResource?.data?.find?.((k) => k.name === name)
+        if (el) el.title = title
         resetDialog()
       }
     "
   />
   <ShareDialog
-    v-if="dialog === 's'"
+    v-else-if="dialog === 's'"
     v-model="dialog"
-    :entity="selections[0]"
-    @success="getEntities.fetch(getEntities.params)"
+    :entity="entities[0]"
+    @success="
+      () => {
+        resource.fetch(resource.params)
+      }
+    "
   />
-
-  <!-- Deletion dialogs -->
-  <GeneralDialog
-    v-if="dialog === 'remove'"
-    v-model="dialog"
-    :entities="selections"
-    :for="'remove'"
-    @success="removeFromList(selections, false)"
-  />
-  <GeneralDialog
-    v-if="dialog === 'restore'"
-    v-model="dialog"
-    :entities="selections"
-    :for="'restore'"
-    @success="removeFromList(selections)"
-  />
-
   <MoveDialog
-    v-if="dialog === 'm'"
+    v-else-if="dialog === 'm'"
     v-model="dialog"
-    :entities="selections"
-    @success="removeFromList(selections)"
+    :entities="entities"
+    @success="removeFromList(entities)"
+    @complete="is_root && resource.fetch(resource.params)"
   />
-  <DeleteDialog
-    v-if="dialog === 'd'"
+  <InfoPopup
+    v-else-if="dialog === 'i'"
     v-model="dialog"
-    :entities="selections"
-    @success="removeFromList(selections)"
+    :entity="entities[0]"
   />
-  <CTADeleteDialog
-    v-if="dialog === 'cta'"
+
+  <!-- Confirmation dialogs -->
+  <ConfirmDialog
+    v-if="
+      [
+        'remove',
+        'restore',
+        'd',
+        'cta-favourites',
+        'cta-recents',
+        'cta-trash',
+      ].includes(dialog)
+    "
     v-model="dialog"
-    @success="resetDialog"
+    :entities="entities"
+    @success="
+      dialog === 'cta'
+        ? resetDialog
+        : removeFromList(entities, dialog === 'restore')
+    "
   />
 </template>
 <script setup>
+import { ref, watch, computed } from "vue"
+import { useStore } from "vuex"
+import { useTimeAgo } from "@vueuse/core"
+import { sortEntities, openEntity } from "@/utils/files"
+
+import emitter from "@/emitter"
+
 import NewFolderDialog from "@/components/NewFolderDialog.vue"
 import NewLinkDialog from "@/components/NewLinkDialog.vue"
 import RenameDialog from "@/components/RenameDialog.vue"
 import ShareDialog from "@/components/ShareDialog/ShareDialog.vue"
-import GeneralDialog from "@/components/GeneralDialog.vue"
-import DeleteDialog from "@/components/DeleteDialog.vue"
-import CTADeleteDialog from "@/components/CTADeleteDialog.vue"
+import ConfirmDialog from "@/components/ConfirmDialog.vue"
 import MoveDialog from "@/components/MoveDialog.vue"
-import emitter from "@/emitter"
-import { useStore } from "vuex"
-import { computed } from "vue"
-import { useRoute } from "vue-router"
-import { sortEntities, setTitle } from "@/utils/files"
-import { useTimeAgo } from "@vueuse/core"
-import { openEntity } from "../utils/files"
-
-const dialog = defineModel(String)
-const store = useStore()
-const route = useRoute()
 
 const props = defineProps({
-  rootResource: Object,
-  selectedRows: Array,
-  getEntities: { type: Object, default: null },
+  entities: Array,
 })
-const resetDialog = () => (dialog.value = "")
-const selections = computed(() => {
-  return props.selectedRows && props.selectedRows.length
-    ? props.selectedRows
-    : props.rootResource
-    ? [props.rootResource.data]
-    : null
+const store = useStore()
+const listResource = computed(() => store.state.listResource)
+const resource = computed(() =>
+  store.state.currentResource && Object.keys(store.state.currentResource).length
+    ? store.state.currentResource
+    : listResource.value
+)
+const is_root = computed(
+  () => props.entities[0].name === resource.value.data?.name
+)
+const dialog = defineModel(String)
+const open = ref(false)
+watch(dialog, (val) => {
+  if (val) open.value = true
 })
 
-emitter.on("showCTADelete", () => (dialog.value = "cta"))
-emitter.on("showShareDialog", () => (dialog.value = "s"))
+const resetDialog = () => (dialog.value = "")
+
+emitter.on("share", () => (dialog.value = "s"))
 emitter.on("newFolder", () => (dialog.value = "f"))
 emitter.on("rename", () => (dialog.value = "rn"))
 emitter.on("remove", () => (dialog.value = "remove"))
@@ -110,47 +114,49 @@ emitter.on("move", () => (dialog.value = "m"))
 emitter.on("newLink", () => (dialog.value = "l"))
 
 function addToList(data, file_type) {
-  if (!props.getEntities) return
+  resetDialog()
+  if (!listResource.value) return
+  const now = Date()
   data = {
     ...data,
-    modified: Date(),
+    modified: now,
     file_type,
     share_count: 0,
     read: 1,
     write: 1,
     share: 1,
     comment: 1,
+    relativeModified: useTimeAgo(now),
   }
-
-  data.relativeModified = useTimeAgo(data.modified)
-
-  const newData = [...props.getEntities.data, data]
-  sortEntities(newData, store.state.sortOrder)
-  props.getEntities.setData(newData)
-  // props.getEntities.fetch()
-  resetDialog()
+  const newData = [...listResource.value.data, data]
+  sortEntities(
+    newData,
+    store.state.sortOrder[listResource.value.params.entityName]
+  )
+  listResource.value.setData(newData)
 }
 
 function removeFromList(entities, move = true) {
-  // Hack (that breaks for some reason)
-  if (!props.getEntities?.data && props.rootResource) {
+  if (is_root.value) {
     if (move) {
       store.state.breadcrumbs.splice(1)
       store.state.breadcrumbs.push({ loading: true })
-      setTimeout(() => props.rootResource.fetch(), 1000)
     } else {
+      resetDialog()
       openEntity(null, {
-        team: props.rootResource.data.team,
-        name: props.rootResource.data.parent_entity,
+        team: resource.value.data.team,
+        name: resource.value.data.parent_entity,
         is_group: true,
       })
     }
   } else {
-    const names = entities.map((o) => o.name)
-    props.getEntities.setData(
-      props.getEntities.data.filter(({ name }) => !names.includes(name))
-    )
+    resetDialog()
+    if (listResource.value) {
+      const names = entities.map((o) => o.name)
+      listResource.value.setData(
+        listResource.value.data.filter(({ name }) => !names.includes(name))
+      )
+    }
   }
-  resetDialog()
 }
 </script>
