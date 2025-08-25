@@ -1,5 +1,6 @@
-from . import __version__ as app_version
 from frappe import _
+
+from . import __version__ as app_version
 
 app_name = "drive"
 app_title = _("Frappe Drive")
