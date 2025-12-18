@@ -1,6 +1,6 @@
 <template>
   <div
-    class="grid grid-cols-5 bg-surface-modal border-t border-outline-gray-2 standalone:pb-4 h-[109px]"
+    class="grid grid-cols-5 bg-surface-modal border-t border-outline-gray-2 standalone:pb-4"
     :style="{
       gridTemplateColumns: `repeat(${sidebarItems.length}, minmax(0, 1fr))`,
     }"
@@ -42,29 +42,30 @@ export default {
       return this.$route.params.team || localStorage.getItem("recentTeam")
     },
     sidebarItems() {
+      const first = this.$store.state.breadcrumbs[0] || {}
       return [
         {
           label: "Home",
-          route: "/t/" + this.team,
+          route: "/",
           icon: LucideHome,
           highlight: () => {
-            return this.$store.state.breadcrumbs[0].name === "Home"
+            return first.name === "Home"
           },
         },
         {
           label: "Team",
-          route: "/t/" + this.team + "/team",
+          route: "/teams",
           icon: LucideBuilding2,
           highlight: () => {
-            return this.$store.state.breadcrumbs[0].name === "Team"
+            return this.$route.name === "Teams"
           },
         },
         {
           label: "Recents",
-          route: "/t/" + this.team + "/recents",
+          route: "/recents",
           icon: LucideClock,
           highlight: () => {
-            return this.$store.state.breadcrumbs[0].name === "Recents"
+            return first.name === "Recents"
           },
         },
 
@@ -73,15 +74,15 @@ export default {
           route: "/shared",
           icon: LucideUsers,
           highlight: () => {
-            return this.$store.state.breadcrumbs[0].name === "Shared"
+            return first.name === "Shared"
           },
         },
         {
           label: "Favourites",
-          route: "/t/" + this.team + "/favourites",
+          route: "/favourites",
           icon: LucideStar,
           highlight: () => {
-            return this.$store.state.breadcrumbs[0].name === "Favourites"
+            return first.name === "Favourites"
           },
         },
       ]
@@ -108,7 +109,7 @@ export default {
       document.body.classList.add("select-none")
       document.body.classList.add("cursor-col-resize")
       let sidebarWidth = e.clientX
-      let range = [60, 180]
+      const range = [60, 180]
       if (sidebarWidth > range[0] && sidebarWidth < range[1]) {
         sidebarWidth = 60
         this.$store.commit("setSidebarCollapsed", false)

@@ -13,8 +13,14 @@
         v-else
         id="renderContainer"
         :draggable="false"
-        class="w-full p-10 md:px-32 flex-grow w-full flex justify-center align-center items-center"
+        class="w-full px-10 py-5 flex-grow w-full flex justify-center align-center items-center relative"
       >
+        <Button
+          class="text-ink-gray-8 absolute top-4 left-4"
+          :variant="'ghost'"
+          icon="arrow-left"
+          @click="closePreview"
+        />
         <LoadingIndicator
           v-if="file.loading"
           class="w-10 h-full text-neutral-100"
@@ -53,14 +59,7 @@
 <script setup>
 import { useStore } from "vuex"
 import Navbar from "@/components/Navbar.vue"
-import {
-  ref,
-  computed,
-  onMounted,
-  defineProps,
-  onBeforeUnmount,
-  inject,
-} from "vue"
+import { ref, computed, onMounted, defineProps } from "vue"
 import { Button, LoadingIndicator } from "frappe-ui"
 import FileRender from "@/components/FileRender.vue"
 import { createResource } from "frappe-ui"
@@ -77,11 +76,8 @@ import ErrorPage from "@/components/ErrorPage.vue"
 
 const router = useRouter()
 const store = useStore()
-const emitter = inject("emitter")
-const realtime = inject("realtime")
 const props = defineProps({
   entityName: String,
-  team: String,
   slug: String,
 })
 
@@ -111,25 +107,23 @@ function fetchFile(currentEntity) {
 }
 
 onKeyStroke("ArrowLeft", (e) => {
-  if (e.metaKey) return
+  if (!e.shiftKey) return
   e.preventDefault()
   scrollEntity(true)
 })
 onKeyStroke("ArrowRight", (e) => {
-  if (e.metaKey) return
+  if (!e.shiftKey) return
   e.preventDefault()
   scrollEntity()
 })
 
 const onSuccess = async (entity) => {
   document.title = entity.title
-  setBreadCrumbs(entity.breadcrumbs, entity.is_private, () =>
-    emitter.emit("rename")
-  )
+  setBreadCrumbs(entity)
   updateURLSlug(entity.title)
 }
 
-let file = createResource({
+const file = createResource({
   url: "drive.api.permissions.get_entity_with_permissions",
   params: { entity_name: props.entityName },
   transform(entity) {
@@ -137,49 +131,23 @@ let file = createResource({
     return prettyData([entity])[0]
   },
   onSuccess,
-  onError() {
-    if (!store.getters.isLoggedIn) router.push({ name: "Login" })
-  },
 })
+store.commit("setCurrentResource", file)
 
 function scrollEntity(negative = false) {
   currentEntity.value = negative ? prevEntity.value : nextEntity.value
   if (currentEntity.value) fetchFile(currentEntity.value.name)
 }
 
+function closePreview() {
+  router.push({
+    name: "Folder",
+    params: { entityName: file.data.parent_entity },
+  })
+}
+
 onMounted(() => {
   fetchFile(props.entityName)
-  realtime.doc_subscribe("Drive File", props.entityName)
-  realtime.doc_open("Drive File", props.entityName)
-  realtime.on("doc_viewers", (data) => {
-    store.state.connectedUsers = data.users
-    userInfo.submit({ users: JSON.stringify(data.users) })
-  })
-})
-
-onBeforeUnmount(() => {
-  realtime.off("doc_viewers")
-  store.state.connectedUsers = []
-  realtime.doc_close("Drive File", file.data?.name)
-  realtime.doc_unsubscribe("Drive File", file.data?.name)
-})
-
-let userInfo = createResource({
-  url: "frappe.desk.form.load.get_user_info_for_viewers",
-  // compatibility with document awareness
-  onSuccess(data) {
-    data = Object.values(data)
-    data.forEach((item) => {
-      if (item.fullname) {
-        item.avatar = item.image
-        item.name = item.fullname
-        delete item.image
-        delete item.fullname
-      }
-    })
-    store.state.connectedUsers = data
-  },
-  auto: false,
 })
 </script>
 

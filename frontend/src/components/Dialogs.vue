@@ -6,6 +6,12 @@
     :parent="$route.params.entityName"
     @success="(data) => addToList(data, 'Folder')"
   />
+  <NewPresentationDialog
+    v-else-if="dialog === 'p'"
+    v-model="dialog"
+    :parent="$route.params.entityName"
+    @success="(data) => addToList(data, 'Presentation')"
+  />
   <NewLinkDialog
     v-else-if="dialog === 'l'"
     v-model="dialog"
@@ -41,7 +47,7 @@
     v-model="dialog"
     :entities="entities"
     @success="removeFromList(entities)"
-    @complete="is_root && resource.fetch(resource.params)"
+    @complete="entity_open && resource.fetch(resource.params)"
   />
   <InfoPopup
     v-else-if="dialog === 'i'"
@@ -74,11 +80,12 @@
 import { ref, watch, computed } from "vue"
 import { useStore } from "vuex"
 import { useTimeAgo } from "@vueuse/core"
-import { sortEntities, openEntity } from "@/utils/files"
+import { openEntity } from "@/utils/files"
 
 import emitter from "@/emitter"
 
 import NewFolderDialog from "@/components/NewFolderDialog.vue"
+import NewPresentationDialog from "@/components/NewPresentationDialog.vue"
 import NewLinkDialog from "@/components/NewLinkDialog.vue"
 import RenameDialog from "@/components/RenameDialog.vue"
 import ShareDialog from "@/components/ShareDialog/ShareDialog.vue"
@@ -95,9 +102,12 @@ const resource = computed(() =>
     ? store.state.currentResource
     : listResource.value
 )
-const is_root = computed(
-  () => props.entities[0].name === resource.value.data?.name
+const entity_open = computed(
+  () =>
+    resource.value.data?.name &&
+    props.entities[0]?.name === resource.value.data?.name
 )
+
 const dialog = defineModel(String)
 const open = ref(false)
 watch(dialog, (val) => {
@@ -128,25 +138,25 @@ function addToList(data, file_type) {
     comment: 1,
     relativeModified: useTimeAgo(now),
   }
-  const newData = [...listResource.value.data, data]
-  sortEntities(
-    newData,
-    store.state.sortOrder[listResource.value.params.entityName]
-  )
-  listResource.value.setData(newData)
+  listResource.value.data.push(data)
 }
 
 function removeFromList(entities, move = true) {
-  if (is_root.value) {
+  if (entity_open.value) {
     if (move) {
       store.state.breadcrumbs.splice(1)
       store.state.breadcrumbs.push({ loading: true })
     } else {
       resetDialog()
-      openEntity(null, {
-        team: resource.value.data.team,
+      listResource.value.setData(
+        listResource.value.data.filter(
+          ({ name }) => name !== resource.value.data.name
+        )
+      )
+      openEntity({
+        is_group: 1,
         name: resource.value.data.parent_entity,
-        is_group: true,
+        breadcrumbs: resource.value.data.breadcrumbs.slice(0, -1),
       })
     }
   } else {

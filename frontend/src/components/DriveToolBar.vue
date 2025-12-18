@@ -21,7 +21,6 @@
             onClick: () => {
               store.commit('toggleShareView', 'by')
             },
-            disabled: !getEntities.data?.length,
           },
           {
             label: __('With you'),
@@ -29,7 +28,6 @@
             onClick: () => {
               store.commit('toggleShareView', 'with')
             },
-            disabled: !getEntities.data?.length,
           },
         ]"
       />
@@ -37,9 +35,9 @@
     <TextInput
       ref="search-input"
       v-model="search"
-      :disabled="!getEntities.data?.length"
+      :disabled
       :class="selections.length ? 'hidden' : 'block'"
-      :placeholder="__('Search')"
+      :placeholder="__('Find')"
       class="w-[30%]"
     >
       <template #prefix>
@@ -48,79 +46,54 @@
     </TextInput>
 
     <div class="flex gap-2 ml-auto my-auto">
-      <template v-if="selections && !selections.length">
+      <template v-if="!selections?.length">
         <div
           v-if="activeFilters.length"
           class="flex flex-wrap items-start justify-end gap-1 ml-3"
         >
           <div
-            v-for="(item, index) in activeFilters"
+            v-for="({ icon, name }, index) in activeFilters"
             :key="index"
           >
             <div
-              class="flex items-center border rounded pl-2 py-1 h-7 text-base"
+              class="flex items-center border rounded pl-2 py-1 h-7 text-base select-none"
             >
-              <component :is="ICON_TYPES[item]" />
-              <span class="text-sm ml-2">{{ item }}</span>
+              <img :src="icon" />
+              <span class="text-sm ml-2">{{ name }}</span>
               <Button
                 variant="minimal"
+                :icon="h(LucideX, { class: 'size-3' })"
                 @click="activeFilters.splice(index, 1)"
-              >
-                <template #icon>
-                  <LucideX class="size-3" />
-                </template>
-              </Button>
-            </div>
-          </div>
-          <div
-            v-for="(item, index) in activeTags"
-            :key="index"
-          >
-            <div
-              class="flex items-center border rounded pl-2 py-1 h-7 text-base"
-            >
-              <svg
-                v-if="item.color"
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <circle
-                  r="4.5"
-                  cx="8"
-                  cy="8"
-                  :fill="item.color"
-                  :stroke="item.color"
-                  stroke-width="3"
-                />
-              </svg>
-              <span class="text-sm ml-2">{{ item.title }}</span>
-
-              <Button
-                variant="minimal"
-                @click="store.state.activeTags.splice(index, 1)"
-              >
-                <template #icon>
-                  <LucideX class="size-3" />
-                </template>
-              </Button>
+              />
             </div>
           </div>
         </div>
+        <Button
+          v-if="getEntities.loading"
+          :loading="true"
+          label="Loading..."
+        />
+        <TeamSelector
+          v-if="
+            ['Shared', 'Recents', 'Favourites', 'Trash'].includes($route.name)
+          "
+          v-model="team"
+          :none="true"
+        />
         <Dropdown
           :options="
-            Object.keys(ICON_TYPES).map((k) => ({
-              label: __(k),
-              icon: ICON_TYPES[k],
-              onClick: () => activeFilters.push(k),
+            availableFilterTypes.map(({ name, icon }) => ({
+              label: __(name),
+              icon: h('img', { src: icon }),
+              onClick: () => activeFilters.push({ name, icon }),
+              disabled: activeFilters.includes({ name, icon }),
             }))
           "
           :button="{
             icon: LucideFilter,
             tooltip: 'Filter',
           }"
+          :disabled
           placement="right"
         />
         <Dropdown
@@ -131,7 +104,7 @@
           <div class="flex items-center whitespace-nowrap">
             <Button
               class="text-sm h-7 border-r border-slate-200 rounded-r-none"
-              :disabled="!getEntities.data?.length"
+              :disabled
               @click.stop="toggleAscending"
             >
               <template #icon>
@@ -148,7 +121,7 @@
 
             <Button
               class="text-sm h-7 rounded-l-none flex-1"
-              :disabled="!getEntities.data?.length"
+              :disabled
             >
               <div class="flex items-center gap-2">
                 {{ __(sortOrder.label) }}
@@ -166,12 +139,12 @@
             {
               icon: 'grid',
               value: 'grid',
-              disabled: !getEntities.data?.length,
+              disabled,
             },
             {
               icon: 'list',
               value: 'list',
-              disabled: !getEntities.data?.length,
+              disabled,
             },
           ]"
         />
@@ -210,29 +183,19 @@
   </div>
 </template>
 <script setup>
-import {
-  Button,
-  Tooltip,
-  Dropdown,
-  TextInput,
-  TabButtons,
-  Switch,
-} from "frappe-ui"
-import {
-  ref,
-  computed,
-  watch,
-  useTemplateRef,
-  h,
-  reactive,
-  defineComponent,
-} from "vue"
-import { ICON_TYPES, MIME_LIST_MAP, sortEntities } from "@/utils/files"
+import { Button, Dropdown, TextInput, TabButtons, Switch } from "frappe-ui"
+import { ref, computed, watch, useTemplateRef, h, defineComponent } from "vue"
+import { getIconUrl } from "@/utils/getIconUrl"
 import { useStore } from "vuex"
 import { onKeyDown } from "@vueuse/core"
 import LucideFilter from "~icons/lucide/filter"
+import TeamSelector from "@/components/TeamSelector.vue"
 
-const rows = defineModel(Array)
+import LucideX from "~icons/lucide/x"
+
+const sortOrder = defineModel("sortOrder")
+const search = defineModel("search")
+const team = defineModel("team")
 const props = defineProps({
   selections: Array,
   actionItems: Array,
@@ -240,60 +203,21 @@ const props = defineProps({
 })
 const store = useStore()
 
-const name = computed(
-  () => props.getEntities.params?.entity_name || props.getEntities.params?.team
-)
-const sortOrder = reactive(
-  store.state.sortOrder[name.value] || {
-    label: "Modified",
-    field: "modified",
-    ascending: false,
-  }
-)
-const activeFilters = ref([])
-const activeTags = computed(() => store.state.activeTags)
+const activeFilters = defineModel("filters")
+const disabled = computed(() => !props.getEntities.data?.length)
 
-const search = ref("")
 const viewState = ref(store.state.view)
 watch(viewState, (val) => store.commit("toggleView", val))
 const shareView = ref(store.state.shareView)
 const searchInput = useTemplateRef("search-input")
-// Do this as the resource data is updated by a lagging `fetch`
-watch(
-  [sortOrder, () => props.getEntities.loading],
-  ([val, loading]) => {
-    if (!rows.value || loading) return
-    sortEntities(rows.value, val)
-    props.getEntities.setData(rows.value)
-    store.commit("setCurrentFolder", {
-      entities: rows.value.filter?.((k) => k.title[0] !== "."),
-    })
-    if (name.value) {
-      store.state.sortOrder[name.value] = val
-      store.commit("setSortOrder", store.state.sortOrder)
-    }
-  },
-  { immediate: true }
-)
 
-watch(activeFilters.value, (val) => {
-  if (!val.length) {
-    rows.value = props.getEntities.data
-    return
-  }
-  const mime_types = []
-  const isFolder = val.find((k) => k === "Folder")
-  for (let k of val) {
-    mime_types.push(...MIME_LIST_MAP[k])
-  }
-  rows.value = props.getEntities.data.filter(
-    ({ mime_type, is_group }) =>
-      mime_types.includes(mime_type) || (isFolder && is_group)
-  )
-})
-watch(search, (val) => {
-  const search = new RegExp(val, "i")
-  rows.value = props.getEntities.data.filter((k) => search.test(k.title))
+const availableFilterTypes = computed(() => {
+  if (!props.getEntities.data) return []
+  const types = new Set(props.getEntities.data.map((r) => r.file_type))
+  if (props.getEntities.data.find((k) => k.is_group)) types.add("Folder")
+  return Array.from(types)
+    .sort((a, b) => (a > b ? 1 : -1))
+    .map((t) => ({ name: t, icon: getIconUrl(t) }))
 })
 
 onKeyDown("Escape", () => {
@@ -305,13 +229,13 @@ const orderByItems = computed(() => {
   return columnHeaders.map((header) => ({
     ...header,
     onClick: () => {
-      sortOrder.field = header.field
-      sortOrder.label = header.label
+      sortOrder.value.field = header.field
+      sortOrder.value.label = header.label
     },
   }))
 })
 const toggleAscending = () => {
-  sortOrder.ascending = !sortOrder.ascending
+  sortOrder.value.ascending = !sortOrder.value.ascending
 }
 
 const columnHeaders = [
@@ -345,9 +269,9 @@ const columnHeaders = [
             return () =>
               h(Switch, {
                 label: __("Smart"),
-                disabled: sortOrder.field !== "title",
-                modelValue: sortOrder.smart,
-                "onUpdate:modelValue": (val) => (sortOrder.smart = val),
+                disabled: sortOrder.value.field !== "title",
+                modelValue: sortOrder.value.smart,
+                "onUpdate:modelValue": (val) => (sortOrder.value.smart = val),
               })
           },
         }),

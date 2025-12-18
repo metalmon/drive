@@ -1,8 +1,11 @@
 <template>
   <GenericPage
     :get-entities="getTrash"
-    :icon="LucideTrash"
-    primary-message="Trash is empty"
+    :empty="{
+      icon: LucideTrash,
+      title: 'Trash is empty',
+      description: 'Trashed files will show up here - you can restore them.',
+    }"
   />
 </template>
 

@@ -8,3 +8,5 @@ thumbnail
 boto3
 PyJWT
 pycrdt
+html2text
+beautifulsoup4

@@ -53,8 +53,7 @@
             <a
               :href="newImageUrl"
               class="truncate max-w-56 underline"
-              >{{ newImageUrl }}</a
-            >
+            >{{ newImageUrl }}</a>
 
             <Button @click="newImageUrl = null">
               <template #icon>
@@ -94,13 +93,6 @@
   <h1 class="font-semibold mt-12 mb-4 text-ink-gray-8">
     {{ __("Preferences") }}
   </h1>
-  <FormControl
-    type="select"
-    v-model="defaultTeam"
-    :options="teamOptions"
-    label="Default Team"
-    class="mb-3"
-  />
 
   <Switch
     v-model="singleClick"
@@ -121,7 +113,6 @@ import {
   Dialog,
   FileUploader,
   Switch,
-  FormControl,
   createDocumentResource,
 } from "frappe-ui"
 import LucideLink from "~icons/lucide/link"
@@ -129,7 +120,6 @@ import LucideX from "~icons/lucide/x"
 
 import { useStore } from "vuex"
 import { ref, computed, watch } from "vue"
-import { getTeams } from "@/resources/files"
 import { settings, setSettings } from "@/resources/permissions"
 
 const store = useStore()
@@ -142,23 +132,15 @@ const newFullName = computed(() => newFirstName.value + " " + newLastName.value)
 
 const editProfileDialog = ref(false)
 
-const teamOptions = computed(() =>
-  getTeams.data
-    ? Object.keys(getTeams.data).map((k) => ({
-        value: k,
-        label: getTeams.data[k].title,
-      }))
-    : {}
-)
-const singleClick = ref(Boolean(settings.data.single_click))
-const detectLinks = ref(Boolean(settings.data.auto_detect_links))
+const singleClick = ref(Boolean(settings.data?.single_click))
+const detectLinks = ref(Boolean(settings.data?.auto_detect_links))
 const defaultTeam = ref(settings.data.default_team || { label: "-" })
 const options = {
   single_click: singleClick,
   auto_detect_links: detectLinks,
   default_team: defaultTeam,
 }
-for (let k in options) {
+for (const k in options) {
   watch(options[k], (v) => {
     setSettings.submit({
       updates: { [k]: v.value || v },
@@ -187,7 +169,7 @@ const updateProfile = () => {
 }
 
 const validateFile = (file) => {
-  let extension = file.name.split(".").pop().toLowerCase()
+  const extension = file.name.split(".").pop().toLowerCase()
   if (!["jpg", "jpeg", "png"].includes(extension)) {
     alert("Not a valid Image file")
     return false

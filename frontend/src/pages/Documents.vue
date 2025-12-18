@@ -1,8 +1,12 @@
 <template>
   <GenericPage
-    :getEntities="getDocuments"
+    :get-entities="getDocuments"
     :icon="LucideFileText"
-    primary-message="You haven't created documents yet."
+    :empty="{
+      icon: LucideFileText,
+      title: `Nothing here`,
+      description: `You haven't created documents yet.`,
+    }"
   />
 </template>
 <script setup>

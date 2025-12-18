@@ -22,10 +22,9 @@ def create_new_activity_log(
         doc.old_value = field_old_value
         doc.new_value = field_new_value
     try:
-        doc.save()
+        doc.save(ignore_permissions=True)
     except:
-        doc.message = doc.message[:140]
-        doc.save()
+        pass
 
 
 @frappe.whitelist()

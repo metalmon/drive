@@ -1,11 +1,15 @@
 <template>
   <GenericPage
     :get-entities="getPersonal"
-    :icon="LucideHome"
-    primary-message="No personal files"
+    :empty="{
+      icon: LucideHome,
+      title: 'No files yet',
+      description: 'Upload to get started!',
+    }"
     :verify="{
       data: {
         write: 1,
+        upload: 1,
       },
     }"
   />
@@ -15,11 +19,10 @@
 import GenericPage from "@/components/GenericPage.vue"
 import { getPersonal } from "@/resources/files"
 import { useStore } from "vuex"
+import { allUsers } from "@/resources/permissions"
 import LucideHome from "~icons/lucide/home"
 
 const store = useStore()
-const props = defineProps({
-  team: String,
-})
-store.commit("setCurrentFolder", { name: "", team: props.team })
+store.commit("setCurrentFolder", { name: "", team: "" })
+allUsers.fetch(null)
 </script>

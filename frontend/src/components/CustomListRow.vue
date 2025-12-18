@@ -11,14 +11,34 @@
           ? 'bg-surface-gray-2 hover:!bg-surface-gray-3'
           : 'bg-surface-white',
         draggedItem === row.name ? 'opacity-60 hover:shadow-none' : '',
+        dragOverItem === row.name ? '!bg-surface-gray-3' : '',
       ]"
       :draggable="true"
-      @contextmenu="(e) => contextMenu(e, row)"
-      @[action]="open(row)"
-      @dragstart="draggedItem = row.name"
+      @contextmenu="(e) => !selections.size && contextMenu(e, row)"
+      @[action]="!isModKey($event) && !selections.size && open(row)"
+      @dragstart="
+        (e) => {
+          draggedItem = row.name
+          e.dataTransfer?.setData('application/x-filename', draggedItem)
+        }
+      "
       @dragend="draggedItem = null"
-      @dragover="row.is_group && $event.preventDefault()"
-      @drop="$emit('dropped', row, draggedItem)"
+      @dragover="
+        (e) => {
+          if (row.is_group) {
+            e.preventDefault()
+            dragOverItem = row.name
+          }
+        }
+      "
+      @dragleave="dragOverItem = null"
+      @drop="
+        $emit(
+          'dropped',
+          row,
+          $event.dataTransfer.getData('application/x-filename')
+        )
+      "
     >
       <template #default="{ idx, column, item }">
         <CustomListRowItem
@@ -26,7 +46,7 @@
           :row="row"
           :item="item"
           :idx="idx"
-          :context-menu="contextMenu"
+          :context-menu="!selections.size && contextMenu"
         />
       </template>
     </ListRow>
@@ -35,7 +55,7 @@
 <script setup>
 import { ListRow } from "frappe-ui"
 import CustomListRowItem from "./CustomListRowItem.vue"
-import { openEntity } from "@/utils/files"
+import { openEntity, isModKey } from "@/utils/files"
 import { settings } from "@/resources/permissions"
 import { useRoute } from "vue-router"
 import { useStore } from "vuex"
@@ -46,18 +66,18 @@ defineProps({
   contextMenu: Function,
   selections: Set,
 })
-const emit = defineEmits(["dropped"])
+defineEmits(["dropped"])
 
 const draggedItem = ref()
+const dragOverItem = ref()
 
 const route = useRoute()
 const store = useStore()
 const action = computed(() =>
-  (settings.data?.message || settings.data).single_click ? "click" : "dblclick"
+  settings.data?.single_click === 0 ? "dblclick" : "click"
 )
 
 // Used as right-click doesn't trigger active in frappe-ui
 const selectedName = computed(() => store.state.activeEntity?.name)
-const open = (row) =>
-  route.name !== "Trash" && openEntity(route.params.team, row)
+const open = (row) => route.name !== "Trash" && openEntity(row)
 </script>

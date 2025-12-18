@@ -9,36 +9,37 @@
       :key="comment.name"
     >
       <div
-        v-on-outside-click="
-          (e) => {
-            if (
-              activeComment === comment.name &&
-              !e.target.getAttribute('data-comment-id') &&
-              e.target.nodeName !== 'BUTTON' &&
-              !comment.new &&
-              !e.target.classList?.contains?.('replies-count')
-            )
-              activeComment = null
-          }
-        "
+        :id="'comment-' + comment.name"
         :ref="
           (el) => {
             if (el) commentRefs[comment.name] = el
             else delete commentRefs[comment.name]
           }
         "
-        :id="'comment-' + comment.name"
-        @click="activeComment = comment.name"
-        class="absolute rounded shadow w-52 md:w-72 comment-group scroll-m-8 bg-surface-white left-1/2 -translate-x-1/2 opacity-0 transition-[top] duration-100 ease-in-out"
+        v-on-outside-click="
+          (e) => {
+            if (
+              activeComment === comment.name &&
+              !e.target.getAttribute('data-comment-id') &&
+              e.target.nodeName === 'DIV' &&
+              !comment.new &&
+              !e.target.classList?.contains?.('replies-count')
+            )
+              activeComment = null
+          }
+        "
+        class="absolute rounded shadow w-52 md:w-72 comment-group scroll-m-24 bg-surface-white left-1/2 -translate-x-1/2 opacity-0 transition-[top] duration-100 ease-in-out"
         :class="[
           activeComment === comment.name && 'shadow-xl ',
           comment.top && 'opacity-100',
         ]"
         :style="`top: ${comment.top}px;`"
+        @click="activeComment = comment.name"
       >
         <div
           v-show="
             activeComment === comment.name &&
+            $store.state.user.id !== 'Guest' &&
             !comment.new &&
             (comment.owner == $store.state.user.id || entity.write)
           "
@@ -76,11 +77,14 @@
             Unresolve
           </Button>
           <Button
-            v-if="comment.owner == $store.state.user.id"
+            v-if="
+              comment.owner == $store.state.user.id ||
+              (comment.owner === 'Guest' && entity.write)
+            "
             :disabled="comment.loading"
             variant="ghost"
             class="!h-5 !text-xs !px-1.5 !rounded-sm"
-            @click="removeComment(comment.name, true)"
+            @click="removeComment(comment.name, true, true)"
           >
             <template #prefix>
               <LucideX class="size-3.5" />
@@ -113,7 +117,7 @@
               <Avatar
                 size="xl"
                 class="bg-surface-white"
-                :label="reply.owner"
+                :label="$user(reply.owner)?.full_name || reply.owner"
                 :image="$user(reply.owner)?.user_image"
               />
             </div>
@@ -127,7 +131,7 @@
                 <div class="flex gap-1">
                   <label
                     class="font-medium text-ink-gray-8 max-w-[70%] truncate"
-                    >{{ $user(reply.owner)?.full_name }}</label
+                    >{{ $user(reply.owner)?.full_name || reply.owner }}</label
                   >
 
                   <label class="text-ink-gray-6 truncate">
@@ -153,7 +157,7 @@
                       },
                       {
                         label: 'Delete',
-                        onClick: () => removeComment(reply.name, false),
+                        onClick: () => removeComment(reply.name, false, true),
                         cond:
                           comment.owner == $store.state.user.id && index !== 0,
                       },
@@ -175,8 +179,8 @@
                       'opacity-100'
                     "
                     variant="ghost"
-                    @click="triggerRoot"
                     :icon="h(LucideMoreVertical, { class: 'size-3' })"
+                    @click="triggerRoot"
                   />
                 </Dropdown>
                 <LucideBadgeCheck
@@ -215,7 +219,7 @@
                   @cancel="
                     (editor) => {
                       if (reply.new) {
-                        removeComment(reply.name, false, false)
+                        removeComment(reply.name, false)
                       } else {
                         editor.commands.setContent(reply.content)
                         reply.edit = false
@@ -228,17 +232,19 @@
           </div>
 
           <div
-            class="flex gap-3"
             v-show="
               activeComment === comment.name &&
               !comment.edit &&
               !comment.resolved
             "
+            class="flex gap-3"
           >
             <Avatar
               size="xl"
               class="self-center"
-              :label="$user($store.state.user.id)?.full_name"
+              :label="
+                $user($store.state.user.id)?.full_name || $store.state.user.id
+              "
               :image="$user($store.state.user.id)?.user_image"
             />
 
@@ -268,7 +274,7 @@
       </div>
     </template>
     <div
-      class="text-large text-ink-gray-9 font-semibold w-80 px-3 py-2 bg-white dark:bg-black bg-opacity-70 fixed"
+      class="text-large text-ink-gray-8 font-semibold w-80 px-3 py-2 bg-white dark:bg-black bg-opacity-70 fixed"
     >
       Comments
       <Button
@@ -311,6 +317,7 @@ const props = defineProps({
   entity: Object,
   editor: Object,
 })
+const emit = defineEmits(["save"])
 
 const store = useStore()
 
@@ -326,8 +333,8 @@ const commentContents = reactive({})
 const findComment = (name) => {
   const mainComment = comments.value.find((k) => k.name == name)
   if (mainComment) return mainComment
-  for (let c of comments.value) {
-    let reply = c.replies.find((k) => k.name == name)
+  for (const c of comments.value) {
+    const reply = c.replies.find((k) => k.name == name)
     if (reply) return reply
   }
 }
@@ -370,6 +377,8 @@ const createComment = createResource({
   url: "drive.api.docs.create_comment",
   onSuccess: () => {
     findComment(createComment.params.name).loading = false
+    console.log("successified")
+    emit("save")
   },
   onError: () => {
     toast({
@@ -380,12 +389,21 @@ const createComment = createResource({
 })
 const editComment = createResource({
   url: "drive.api.docs.edit_comment",
+  onSuccess: () => {
+    emit("save")
+  },
 })
 const deleteComment = createResource({
   url: "drive.api.docs.delete_comment",
+  onSuccess: () => {
+    emit("save")
+  },
 })
 const resolveComment = createResource({
   url: "drive.api.docs.resolve_comment",
+  onSuccess: () => {
+    emit("save")
+  },
 })
 
 // Functions
@@ -411,15 +429,18 @@ const newReply = (comment, editor) => {
   setCommentHeights()
 }
 
-const removeComment = (name, entire, server = true) => {
-  if (server) deleteComment.submit({ name, entire })
+const removeComment = (name, entire, server = false) => {
+  if (server) {
+    deleteComment.submit({ name, entire })
+  }
+
   props.editor.commands.unsetComment(name)
-  for (let [i, val] of Object.entries(comments.value)) {
+  for (const [i, val] of Object.entries(comments.value)) {
     if (val.name === name) {
       comments.value.splice(i, 1)
       break
     }
-    for (let [k, reply] of Object.entries(val.replies)) {
+    for (const [k, reply] of Object.entries(val.replies)) {
       if (reply.name === name) {
         val.replies.splice(k, 1)
         break
@@ -455,16 +476,16 @@ const formatDateOrTime = (datetimeStr) => {
 }
 
 const setCommentHeights = useDebounceFn(() => {
+  if (!scrollContainer.value) return
   let lastBottom = 0
   nextTick(() => {
     scrollContainer.value.style.height = `max(${scrollContainer.value.parentElement.scrollHeight}px, calc(100vh - 3rem))`
-    for (let comment of filteredComments.value) {
+    for (const comment of filteredComments.value) {
       try {
         const containerTop = scrollContainer.value.getBoundingClientRect().top
-        const anchorTop =
-          document
-            .querySelector(`[data-comment-id="${comment.name}"]`)
-            .getBoundingClientRect().top - containerTop
+        const el = document.querySelector(`[data-comment-id="${comment.name}"]`)
+        if (!el) continue
+        const anchorTop = el.getBoundingClientRect().top - containerTop
 
         const adjustedTop = Math.max(anchorTop, lastBottom)
         comment.top = adjustedTop
@@ -489,13 +510,14 @@ props.editor.on("update", () => {
       }
     })
   })
-  for (let comment of comments.value)
-    if (!currentNames.has(comment.name)) removeComment(comment.name, true)
+  // disable autodeletion
+  // for (const comment of comments.value)
+  //   if (!currentNames.has(comment.name)) removeComment(comment.name, true)
 })
 
 const purgeNewEmptyComments = () => {
   for (const comment of comments.value)
-    if (comment.new) removeComment(comment.name, true, false)
+    if (comment.new) removeComment(comment.name, true)
 }
 onBeforeUnmount(purgeNewEmptyComments)
 useEventListener(window, "beforeunload", purgeNewEmptyComments)

@@ -1,4 +1,4 @@
-import { createResource, toast as nToast } from "frappe-ui"
+import { createResource } from "frappe-ui"
 import { toast } from "@/utils/toasts"
 import { openEntity, setTitle } from "@/utils/files"
 import store from "@/store"
@@ -10,21 +10,12 @@ import { updateURLSlug } from "@/utils/files"
 export const COMMON_OPTIONS = {
   method: "GET",
   debounce: 500,
-  onError(error) {
-    if (error && error.exc_type === "PermissionError") {
-      store.commit("setError", {
-        primaryMessage: "Forbidden",
-        secondaryMessage: "Insufficient permissions for this resource",
-      })
-      router.replace({ name: "Error" })
-    }
-  },
   transform(data) {
-    return prettyData(data)
+    return prettyData(data.filter((k) => !k.title.startsWith(".")))
   },
 }
 
-export const getHome = createResource({
+export const getTeam = createResource({
   ...COMMON_OPTIONS,
   url: "drive.api.list.files",
   makeParams: (params) => {
@@ -33,7 +24,7 @@ export const getHome = createResource({
       personal: 0,
     }
   },
-  cache: "home-folder-contents",
+  cache: "team-folder-contents",
 })
 
 export const getTeams = createResource({
@@ -68,7 +59,7 @@ export const getFavourites = createResource({
   url: "drive.api.list.files",
   cache: "favourite-folder-contents",
   makeParams: (params) => {
-    return { ...params, favourites_only: true }
+    return { ...params, favourites_only: 1 }
   },
 })
 
@@ -81,10 +72,29 @@ export const getDocuments = createResource({
   cache: "document-folder-contents",
 })
 
+export const getSlides = createResource({
+  ...COMMON_OPTIONS,
+  url: "slides.slides.doctype.presentation.presentation.get_all_presentations",
+  cache: "slides-folder-contents",
+  transform(data) {
+    data = data.map((k) => ({
+      ...k,
+      mime_type: "frappe/slides",
+      file_type: "Presentation",
+      path: k.name,
+      external: true,
+      file_size: 0,
+    }))
+    prettyData(data)
+    return data
+  },
+})
+
 export const getShared = createResource({
   ...COMMON_OPTIONS,
-  url: "drive.api.list.shared",
+  url: "drive.api.list.files",
   cache: "shared-folder-contents",
+  params: { shared: "by" },
   makeParams: (params) => {
     return { ...params }
   },
@@ -102,7 +112,7 @@ export const getTrash = createResource({
 // SETTERS
 export const LISTS = [
   getPersonal,
-  getHome,
+  getTeam,
   getRecents,
   getShared,
   getFavourites,
@@ -146,7 +156,7 @@ export const updateMoved = (team, new_parent, special) => {
         : {}
     )
   } else {
-    ;(move.params.is_private ? getPersonal : getHome).fetch({ team })
+    ;(move.params.is_private ? getPersonal : getTeam).fetch({ team })
   }
 }
 
@@ -222,11 +232,8 @@ export const clearTrash = createResource({
   },
   onError(error) {
     toast({
-      title: "There was an error",
-      description: JSON.stringify(error),
-      position: "bottom-right",
-      type: "error",
-      timeout: 2,
+      text: JSON.stringify(error),
+      error: true,
     })
   },
 })
@@ -245,13 +252,14 @@ export const rename = createResource({
     if (l.name === rename.params.entity_name) {
       l.label = rename.params.new_title
       store.state.activeEntity.title = rename.params.new_title
+      store.state.activeEntity.modified = new Date()
       setTitle(rename.params.new_title)
       updateURLSlug(rename.params.new_title)
     }
   },
   onError(error) {
     toast({
-      title: error.messages[0],
+      title: error.messages[error.messages.length - 1],
       position: "bottom-right",
       type: "error",
       timeout: 2,
@@ -265,6 +273,11 @@ export const createDocument = createResource({
   makeParams: (params) => params,
 })
 
+export const createPresentation = createResource({
+  method: "POST",
+  url: "drive.api.files.create_presentation",
+})
+
 export const move = createResource({
   url: "drive.api.files.move",
   onSuccess(data) {
@@ -275,11 +288,9 @@ export const move = createResource({
           label: "Go",
           onClick: () => {
             if (!data.special)
-              openEntity(null, {
+              openEntity({
                 name: data.name,
-                team: data.team,
                 is_group: true,
-                is_private: data.is_private,
               })
             else router.push({ name: data.title })
           },
@@ -311,7 +322,6 @@ export const allFolders = createResource({
       value: k.name,
       label: k.title,
       parent: k.parent_entity,
-      is_private: k.is_private,
     })),
 })
 
@@ -321,7 +331,13 @@ export const translate = createResource({
   cache: "translate",
 })
 
-setCache(getHome, "home-folder-contents")
+export const storageBar = createResource({
+  url: "drive.api.storage.storage_bar_data",
+  method: "GET",
+  cache: "total_storage",
+})
+
+setCache(getTeam, "home-folder-contents")
 setCache(getShared, "shared-folder-contents")
 setCache(getRecents, "recents-folder-contents")
 setCache(getFavourites, "favourite-folder-contents")

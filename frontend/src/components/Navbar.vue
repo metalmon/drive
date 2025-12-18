@@ -1,54 +1,77 @@
 <template>
   <nav
+    v-if="store.state.breadcrumbs?.length"
+    id="navbar"
     ondragstart="return false;"
     ondrop="return false;"
-    class="bg-surface-white border-b px-5 py-2.5 h-12 flex items-center justify-between"
+    class="bg-surface-white border-b px-5 py-2.5 h-12 flex justify-between"
   >
-    <Breadcrumbs
-      :items="store.state.breadcrumbs"
-      class="select-none truncate"
-    >
-      <template #prefix="{ item, index }">
-        <LoadingIndicator
-          v-if="item.loading"
-          width="20"
-          scale="70"
-        />
-        <div
-          v-if="index == 0"
-          class="mr-1.5"
-        >
-          <component
-            :is="COMPONENT_MAP[item.name]"
-            class="size-4 text-ink-gray-6"
+    <slot name="breadcrumbs">
+      <Breadcrumbs
+        :items="store.state.breadcrumbs"
+        class="select-none truncate max-w-[80%]"
+      >
+        <template #prefix="{ item, index }">
+          <LoadingIndicator
+            v-if="item.loading"
+            width="20"
+            scale="70"
           />
-        </div>
-      </template>
-    </Breadcrumbs>
+          <div
+            v-if="index == 0"
+            class="mr-1.5"
+          >
+            <component
+              :is="COMPONENT_MAP[item.name]"
+              class="size-4 text-ink-gray-6"
+            />
+          </div>
+        </template>
+      </Breadcrumbs>
+    </slot>
 
     <div class="flex gap-2">
       <div
         id="navbar-content"
-        class="flex align-center"
-      />
+        class="flex items-center"
+      >
+        <div class="icon mr-2">
+          <LucideGlobe2
+            v-if="rootEntity?.share_count === -2"
+            class="size-4"
+          />
+          <LucideBuilding2
+            v-else-if="rootEntity?.share_count === -1"
+            class="size-4"
+          />
+          <LucideUsers
+            v-else-if="rootEntity?.share_count > 0"
+            class="size-4"
+          />
+        </div>
+      </div>
+
       <LucideStar
         v-if="rootEntity?.is_favourite"
         width="16"
         height="16"
         class="my-auto stroke-amber-500 fill-amber-500"
       />
-      <template v-if="!isLoggedIn">
+      <template v-if="!isLoggedIn && !inIframe">
         <Button
-          label="Download"
           variant="outline"
-          @click="entitiesDownload($route.params.team, [rootEntity])"
-        />
-        <Button
-          variant="solid"
           @click="$router.push({ name: 'Login' })"
         >
           Sign In
         </Button>
+        <Button
+          class="hidden md:block"
+          variant="solid"
+          label="Try out Drive"
+          @click="
+            open('https://frappecloud.com/dashboard/signup?product=drive')
+          "
+        />
       </template>
       <Dropdown
         v-else-if="defaultActions"
@@ -56,25 +79,33 @@
         placement="right"
         :button="{
           variant: 'ghost',
-          onClick: () => {
-            $store.commit('setActiveEntity', rootEntity)
-          },
           icon: LucideMoreHorizontal,
         }"
       />
-
       <Dropdown
         v-if="
           ['Folder', 'Home', 'Team'].includes($route.name) &&
           isLoggedIn &&
-          props.rootResource?.data?.write !== false
+          props.rootResource?.data?.upload
         "
         :button="{
           variant: 'solid',
-          icon: LucidePlus,
+          id: 'create-button',
+          label: 'Create',
+          iconLeft: h(LucidePlus, { class: 'size-4' }),
         }"
         :options="newEntityOptions"
         placement="right"
+      />
+      <Button
+        v-else-if="$route.name === 'Documents' || $route.name === 'Slides'"
+        id="create-button"
+        label="Create"
+        variant="solid"
+        :icon-left="h(LucidePlus, { class: 'size-4' })"
+        @click="
+          newExternal($route.name === 'Documents' ? 'Document' : 'Presentation')
+        "
       />
       <Button
         v-if="button"
@@ -91,42 +122,22 @@
         {{ button.label }}
       </Button>
     </div>
-    <Button
-      v-if="!isLoggedIn"
-      class="fixed bottom-4 right-4 text-sm"
-      variant="outline"
-      :icon-left="h(FrappeDriveLogo, { class: 'w-4.5 h-4.5' })"
-      label="Try out Drive"
-      @click="open('https://frappe.io/drive')"
-    />
     <Dialogs
       v-model="dialog"
-      :entities="entities?.length ? entities : [rootEntity]"
+      :entities="entities.length ? entities : rootEntity ? [rootEntity] : []"
     />
   </nav>
 </template>
 <script setup>
-import {
-  Button,
-  Breadcrumbs,
-  LoadingIndicator,
-  Dropdown,
-  toast,
-} from "frappe-ui"
+import { Button, Breadcrumbs, LoadingIndicator, Dropdown } from "frappe-ui"
 import { useStore } from "vuex"
 import emitter from "@/emitter"
 import { ref, computed, inject, h } from "vue"
 import { entitiesDownload } from "@/utils/download"
-import {
-  getRecents,
-  getFavourites,
-  getTrash,
-  createDocument,
-  toggleFav,
-  getDocuments,
-} from "@/resources/files"
-import { useRoute, useRouter } from "vue-router"
-import { getLink, prettyData } from "@/utils/files"
+import { getRecents, getTrash, toggleFav } from "@/resources/files"
+import { apps } from "@/resources/permissions"
+import { useRoute } from "vue-router"
+import { getLink, newExternal, dynamicList } from "@/utils/files"
 
 import LucideClock from "~icons/lucide/clock"
 import LucideHome from "~icons/lucide/home"
@@ -145,8 +156,8 @@ import LucideInfo from "~icons/lucide/info"
 import LucideFileUp from "~icons/lucide/file-up"
 import LucideFolderUp from "~icons/lucide/folder-up"
 import LucideFilePlus2 from "~icons/lucide/file-plus-2"
+import LucideGalleryVerticalEnd from "~icons/lucide/gallery-vertical-end"
 import LucideFolderPlus from "~icons/lucide/folder-plus"
-import FrappeDriveLogo from "./FrappeDriveLogo.vue"
 
 const COMPONENT_MAP = {
   Home: LucideHome,
@@ -158,7 +169,6 @@ const COMPONENT_MAP = {
 }
 const store = useStore()
 const route = useRoute()
-const router = useRouter()
 const open = (url) => {
   window.open(url, "_blank")
 }
@@ -169,7 +179,7 @@ const props = defineProps({
   // Used to pass into dialogs
   entities: {
     type: Array,
-    default: [],
+    default: () => [],
   },
 })
 
@@ -202,6 +212,7 @@ const defaultActions = computed(() => {
         {
           label: __("Download"),
           icon: LucideDownload,
+          isEnabled: () => rootEntity.value.allow_download,
           onClick: () =>
             entitiesDownload(route.params.team, [rootEntity.value]),
         },
@@ -272,42 +283,16 @@ const defaultActions = computed(() => {
         },
       ],
     },
-    { group: true, hideLabel: true, items: actions },
+    ...actions,
   ].map((k) => {
     return { ...k, items: k.items.filter((l) => !l.isEnabled || l.isEnabled()) }
   })
 })
+const isPrivate = computed(() =>
+  store.state.breadcrumbs[0]?.name === "Home" ? 1 : 0
+)
 
 // Functions
-const newDocument = async () => {
-  toast.promise(
-    createDocument.submit({
-      title: "Untitled Document",
-      team: route.params.team,
-      personal: store.state.breadcrumbs[0].name === "Home" ? 1 : 0,
-      content: null,
-      parent: store.state.currentFolder.name,
-    }),
-    {
-      successDuration: 1,
-      loading: "Creating document...",
-      success: (data) => {
-        prettyData([data])
-        data.file_type = "Document"
-        store.state.listResource.data?.push?.(data)
-        getDocuments.data?.push(data)
-        window.open(
-          router.resolve({
-            name: "Document",
-            params: { team: route.params.team, entityName: data.name },
-          }).href
-        )
-        return "Created"
-      },
-      error: "Failed to create document",
-    }
-  )
-}
 
 // Constants
 const possibleButtons = [
@@ -316,12 +301,6 @@ const possibleButtons = [
     label: __("Clear"),
     icon: LucideClock,
     entities: getRecents,
-  },
-  {
-    route: "Favourites",
-    label: __("Clear"),
-    icon: LucideStar,
-    entities: getFavourites,
   },
   {
     route: "Trash",
@@ -335,7 +314,33 @@ const button = computed(() =>
   possibleButtons.find((k) => k.route == route.name)
 )
 
-const newEntityOptions = [
+const newEntityOptions = computed(() => [
+  {
+    group: "Create",
+    items: dynamicList([
+      {
+        label: "Document",
+        icon: LucideFilePlus2,
+        onClick: () => newExternal("Document"),
+      },
+      {
+        label: "Presentation",
+        icon: LucideGalleryVerticalEnd,
+        onClick: () => (dialog.value = "p"),
+        cond: isPrivate.value && apps.data?.find?.((k) => k.name === "slides"),
+      },
+      {
+        label: "Folder",
+        icon: LucideFolderPlus,
+        onClick: () => (dialog.value = "f"),
+      },
+      {
+        label: "Link",
+        icon: LucideLink,
+        onClick: () => (dialog.value = "l"),
+      },
+    ]),
+  },
   {
     group: "Upload",
     items: [
@@ -351,25 +356,7 @@ const newEntityOptions = [
       },
     ],
   },
-  {
-    group: "Create",
-    items: [
-      {
-        label: "Document",
-        icon: LucideFilePlus2,
-        onClick: newDocument,
-      },
-      {
-        label: "Folder",
-        icon: LucideFolderPlus,
-        onClick: () => (dialog.value = "f"),
-      },
-      {
-        label: "New Link",
-        icon: LucideLink,
-        onClick: () => (dialog.value = "l"),
-      },
-    ],
-  },
-]
+])
+
+const inIframe = inject("inIframe")
 </script>

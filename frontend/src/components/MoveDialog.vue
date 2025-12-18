@@ -1,8 +1,8 @@
 <template>
   <Dialog
     v-model="open"
-    @close="dialogType = ''"
     :options="{ size: 'lg' }"
+    @close="dialogType = ''"
   >
     <template #body-main>
       <div class="p-4 sm:px-6">
@@ -29,26 +29,18 @@
             </template>
           </Button>
         </div>
-        <!-- <Combobox
-          v-if="allFolders.data"
-          v-model="folderSearch"
-          class="mb-2"
-          placeholder="Search for a folder"
-          :options="
-            allFolders.data.filter((k) =>
-              currentFolder === ''
-                ? k.label !== 'Home'
-                : k.value !== currentFolder
-            )
-          "
-        /> -->
         <Tabs
           v-model="tabIndex"
           as="div"
           :tabs="tabs"
         >
           <template #tab-panel>
-            <div class="py-1 h-64 overflow-auto">
+            <div class="py-1 h-64 overflow-auto flex flex-col">
+              <TeamSelector
+                v-if="tabIndex === 1"
+                v-model="chosenTeam"
+                class="py-2 px-1"
+              />
               <Tree
                 v-for="k in tree.children"
                 :key="k.value"
@@ -59,12 +51,24 @@
                   #node="{ node, hasChildren, isCollapsed, toggleCollapsed }"
                 >
                   <div
-                    class="flex items-center cursor-pointer select-none gap-1 h-7"
-                    @click="openEntity(node.value)"
+                    class="flex items-center cursor-pointer select-none gap-1 h-7 shrink-0"
+                    @click="openEntity(node)"
                   >
                     <div
                       ref="iconRef"
-                      @click="toggleCollapsed($event)"
+                      @click="
+                        (e) => {
+                          if (isCollapsed)
+                            node.children.forEach((k) =>
+                              fetchFolderContents(
+                                k,
+                                { entity_name: k.value },
+                                true
+                              )
+                            )
+                          toggleCollapsed(e)
+                        }
+                      "
                     >
                       <LucideChevronDown
                         v-if="hasChildren && !isCollapsed"
@@ -82,10 +86,10 @@
                     <div
                       class="flex-grow rounded-sm text-base truncate h-full flex items-center pl-1"
                       :class="[
-                        currentFolder === node.value
+                        selected === node.value
                           ? 'bg-surface-gray-3'
                           : 'hover:bg-surface-gray-2',
-                        $store.state.currentFolder.name === node.value
+                        entities[0].parent_entity === node.value
                           ? 'cursor-not-allowed hover:bg-surface-white'
                           : 'group',
                       ]"
@@ -113,15 +117,16 @@
                       </div>
                       <span v-else
                         >{{ node.label }}
-                        <em
-                          v-if="$store.state.currentFolder.name === node.value"
-                          >(current)</em
+                        <span
+                          v-if="entities[0].parent_entity === node.value"
+                          class="text-ink-gray-5"
+                          >(current)</span
                         ></span
                       >
                       <Button
                         class="shrink hidden group-hover:block ml-auto"
                         :class="{
-                          '!bg-surface-gray-3': currentFolder === node.value,
+                          '!bg-surface-gray-3': selected === node.value,
                         }"
                         @click.stop="
                           (e) => {
@@ -142,11 +147,19 @@
                 </template>
               </Tree>
               <div
-                v-if="!tree.children.length"
-                class="text-base flex justify-center h-full"
+                v-if="tree.loading"
+                class="text-base flex justify-center flex-1"
               >
-                <div class="self-center text-ink-gray-6 flex flex-col gap-2">
-                  <LucideFolderClosed class="size-6 self-center" />
+                <LoadingIndicator class="w-4.5" />
+              </div>
+              <div
+                v-else-if="!tree.children.length"
+                class="flex justify-center flex-1"
+              >
+                <div
+                  class="self-center text-sm text-ink-gray-6 flex flex-col gap-2"
+                >
+                  <LucideFolderClosed class="size-5 self-center" />
                   No folders found
                 </div>
               </div>
@@ -154,55 +167,53 @@
           </template>
         </Tabs>
         <div class="flex items-center justify-between pt-4">
-          <div class="flex flex-col">
-            <div class="flex items-center my-auto justify-start">
-              <p class="text-sm pr-0.5">Moving to:</p>
-              <Dropdown
-                v-if="dropDownBreadcrumbs.length"
-                class="h-7"
-                :options="dropDownBreadcrumbs"
-              >
-                <Button variant="ghost">
-                  <LucideEllipsis class="size-3.5" />
-                </Button>
-              </Dropdown>
+          <div class="flex items-center my-auto justify-start">
+            <p class="text-sm pr-0.5">Moving to:</p>
+            <Dropdown
+              v-if="dropDownBreadcrumbs.length"
+              class="h-7"
+              :options="dropDownBreadcrumbs"
+            >
+              <Button variant="ghost">
+                <LucideEllipsis class="size-3.5" />
+              </Button>
+            </Dropdown>
+            <span
+              v-if="dropDownBreadcrumbs.length"
+              class="text-ink-gray-5 mx-0.5"
+            >
+              {{ "/" }}
+            </span>
+            <div
+              v-for="(crumb, index) in slicedBreadcrumbs"
+              :key="index"
+              class="flex items-center"
+            >
               <span
-                v-if="dropDownBreadcrumbs.length"
+                v-if="breadcrumbs.length > 1 && index > 0"
                 class="text-ink-gray-5 mx-0.5"
               >
                 {{ "/" }}
               </span>
-              <div
-                v-for="(crumb, index) in slicedBreadcrumbs"
-                :key="index"
+              <button
+                class="text-base cursor-pointer truncate max-w-20"
+                :title="crumb.title"
+                :class="
+                  index === slicedBreadcrumbs.length - 1
+                    ? 'text-ink-gray-9 text-base font-medium p-1'
+                    : 'text-ink-gray-5 text-base rounded-[6px] hover:bg-surface-gray-2 p-1'
+                "
+                @click="closeEntity(crumb.name)"
               >
-                <span
-                  v-if="breadcrumbs.length > 1 && index > 0"
-                  class="text-ink-gray-5 mx-0.5"
-                >
-                  {{ "/" }}
-                </span>
-                <button
-                  class="text-base cursor-pointer"
-                  :class="
-                    index === slicedBreadcrumbs.length - 1
-                      ? 'text-ink-gray-9 text-base font-medium p-1'
-                      : 'text-ink-gray-5 text-base rounded-[6px] hover:bg-surface-gray-2 p-1'
-                  "
-                  @click="closeEntity(crumb.name)"
-                >
-                  {{ crumb.title }}
-                </button>
-              </div>
+                {{ crumb.title }}
+              </button>
             </div>
           </div>
           <Button
             variant="solid"
             class="ml-auto"
             size="sm"
-            :disabled="
-              currentFolder === '' && breadcrumbs[0].title == $route.name
-            "
+            :disabled="isMoveDisabled"
             :loading="move.loading"
             @click="moveFile"
           >
@@ -227,8 +238,10 @@ import {
   Dropdown,
   Tree,
   Input,
+  LoadingIndicator,
 } from "frappe-ui"
-import { move, allFolders } from "@/resources/files"
+import { move, getTeams } from "@/resources/files"
+import { toast } from "@/utils/toasts"
 
 import { useRoute } from "vue-router"
 import { useStore } from "vuex"
@@ -237,10 +250,8 @@ import LucideChevronDown from "~icons/lucide/chevron-down"
 import LucideFolder from "~icons/lucide/folder"
 import LucideHome from "~icons/lucide/home"
 import LucideArrowLeftRight from "~icons/lucide/arrow-left-right"
+import TeamSelector from "./TeamSelector.vue"
 
-const route = useRoute()
-
-const emit = defineEmits(["success", "complete"])
 const props = defineProps({
   entities: {
     type: Object,
@@ -248,21 +259,18 @@ const props = defineProps({
     default: null,
   },
 })
+const emit = defineEmits(["success", "complete"])
+
 const dialogType = defineModel()
 const open = ref(true)
 
-const currentFolder = ref("")
-
-const homeMap = {}
-const teamMap = {}
-allFolders.data.forEach((item) => {
-  ;(item.is_private ? homeMap : teamMap)[item.value] = {
-    ...item,
-    children: [],
-  }
-})
-
-const homeRoot = reactive({
+const store = useStore()
+const route = useRoute()
+const in_home = store.state.breadcrumbs[0].name == "Home"
+const tabIndex = ref(in_home ? 0 : 1)
+console.log(route.params)
+const chosenTeam = ref(route.params.team || "")
+const tree = reactive({
   name: "",
   label: "Home",
   children: [],
@@ -270,49 +278,12 @@ const homeRoot = reactive({
     isCollapsed: true,
   },
 })
-const teamRoot = reactive({
-  name: "",
-  label: "Team",
-  children: [],
-  options: {
-    isCollapsed: true,
-  },
-})
 
-allFolders.data.forEach((item) => {
-  let map = item.is_private ? homeMap : teamMap
-  const node = map[item.value]
-  node.isCollapsed = true
-  if (map[item.parent]) {
-    map[item.parent].children.push(node)
-  } else {
-    ;(item.is_private ? homeRoot : teamRoot).children.push(node)
-  }
-})
-
-const store = useStore()
-const in_home = store.state.breadcrumbs[0].name == "Home"
-const tabIndex = ref(in_home ? 0 : 1)
-const tree = ref(tabIndex.value === 0 ? homeRoot : teamRoot)
-
-const slicedBreadcrumbs = computed(() => {
-  if (breadcrumbs.value.length > 3) {
-    return breadcrumbs.value.slice(-3)
-  }
-  return breadcrumbs.value
-})
-
-const dropDownBreadcrumbs = computed(() => {
-  let allExceptLastTwo = breadcrumbs.value.slice(0, -3)
-  return allExceptLastTwo.map((item) => {
-    return {
-      ...item,
-      icon: null,
-      label: item.title,
-      onClick: () => closeEntity(item.name),
-    }
-  })
-})
+// State variables
+const selected = ref("")
+const breadcrumbs = ref([
+  { name: "", title: in_home ? "Home" : "Team", is_private: in_home ? 1 : 0 },
+])
 
 const tabs = [
   {
@@ -320,7 +291,7 @@ const tabs = [
     icon: h(LucideHome, { class: "size-4" }),
   },
   {
-    label: "Team",
+    label: "Teams",
     icon: h(LucideBuilding2, { class: "size-4" }),
   },
   // {
@@ -329,51 +300,83 @@ const tabs = [
   // },
 ]
 
-const breadcrumbs = ref([
-  { name: "", title: in_home ? "Home" : "Team", is_private: in_home ? 1 : 0 },
-])
-const folderSearch = ref("")
+const folderContents = createResource({
+  url: "drive.api.list.files",
+  makeParams: (params) => ({
+    ...params,
+    team: chosenTeam.value,
+    is_active: 1,
+    folders: 1,
+  }),
+})
 
-const folderPermissions = createResource({
-  url: "drive.api.permissions.get_entity_with_permissions",
+const fetchFolderContents = (tree, params = {}, nested = false) => {
+  folderContents.fetch(params, {
+    onSuccess: (data) => {
+      tree.children = []
+      data.forEach((item) => {
+        const node = reactive({
+          ...item,
+          label: item.title,
+          value: item.name,
+          children: [],
+        })
+        node.isCollapsed = true
+        tree.children.push(node)
+        if (!nested)
+          fetchFolderContents(
+            node,
+            { ...params, entity_name: node.value },
+            true
+          )
+      })
+      tree.loading = false
+    },
+  })
+}
+const homeTeam = createResource({
+  url: "drive.utils.get_default_team",
   params: {
-    entity_name: currentFolder.value,
+    with_file: true,
   },
+  auto: true,
+})
+
+const selectedPerms = createResource({
+  url: "drive.api.permissions.get_entity_with_permissions",
+  makeParams: () => ({
+    entity_name: selected.value,
+  }),
   onSuccess: (data) => {
-    let first = [{ name: "", title: data.is_private ? "Home" : "Team" }]
+    const team = getTeams.data[data.team]
+    const first = [
+      {
+        name: "",
+        title: team ? team.title : "Home",
+      },
+    ]
     breadcrumbs.value = first.concat(data.breadcrumbs.slice(1))
   },
 })
 
-const folderContents = createResource({
-  url: "drive.api.list.files",
-  makeParams: (params) => ({
-    team: route.params.team,
-    is_active: 1,
-    folders: 1,
-    ...params,
-  }),
-})
-
 watch(
-  tabIndex,
-  (newValue) => {
-    currentFolder.value = ""
-    tree.value = tabIndex.value === 0 ? homeRoot : teamRoot
+  [tabIndex, chosenTeam],
+  ([newValue, team]) => {
+    selected.value = ""
+    tree.loading = true
+    if (newValue === 1 && !team) return
+    tree.children = []
     switch (newValue) {
       case 0:
+        chosenTeam.value = ""
         breadcrumbs.value = [{ name: "", title: "Home", is_private: 1 }]
-        folderContents.fetch({
-          entity_name: "",
-          personal: 1,
-        })
+        fetchFolderContents(tree)
         break
       case 1:
-        breadcrumbs.value = [{ name: "", title: "Team", is_private: 0 }]
-        folderContents.fetch({
-          entity_name: "",
-          personal: 0,
-        })
+        breadcrumbs.value = [
+          { name: "", title: getTeams.data[team].title, is_private: 0 },
+        ]
+        fetchFolderContents(tree)
         break
       case 2:
         folderContents.fetch({
@@ -386,6 +389,36 @@ watch(
   { immediate: true }
 )
 
+// Breadcrumb logic
+const slicedBreadcrumbs = computed(() => {
+  if (breadcrumbs.value.length > 3) {
+    return breadcrumbs.value.slice(-3)
+  }
+  return breadcrumbs.value
+})
+const isMoveDisabled = computed(() => {
+  const parent = props.entities[0].parent_entity
+  console.log(getTeams.data?.[chosenTeam.value])
+  if (!selected.value) {
+    // buggy: does not check for team root files
+    if (!chosenTeam.value && homeTeam.data?.file === parent) return true
+  }
+  return parent === selected.value
+})
+
+const dropDownBreadcrumbs = computed(() => {
+  const allExceptLastTwo = breadcrumbs.value.slice(0, -3)
+  return allExceptLastTwo.map((item) => {
+    return {
+      ...item,
+      icon: null,
+      label: item.title,
+      onClick: () => closeEntity(item.name),
+    }
+  })
+})
+
+// New folder logic
 const createdNode = ref(null)
 const createFolder = createResource({
   url: "drive.api.files.create_folder",
@@ -400,18 +433,23 @@ const createFolder = createResource({
   },
   onSuccess(data) {
     createdNode.value.value = data.name
-    currentFolder.value = data.name
-    allFolders.data.push(createdNode.value)
-    folderPermissions.fetch({
-      entity_name: data.name,
-    })
+    createdNode.value.children = []
+    selected.value = data.name
+    selectedPerms.fetch()
     createdNode.value = null
+  },
+  onError() {
+    toast({
+      type: "error",
+      title: "There is already a folder with this name here.",
+    })
   },
 })
 
+// Selection logic
 function openEntity(node) {
-  if (store.state.currentFolder.name === node) return
-  if (!node) {
+  if (props.entities[0].parent_entity === node.value) return
+  if (!node.value) {
     createdNode.value = node
     createFolder.fetch({
       title: node.label,
@@ -419,44 +457,21 @@ function openEntity(node) {
       parent: node.parent,
     })
   } else {
-    currentFolder.value = node
-    folderPermissions.fetch({
-      entity_name: currentFolder.value,
+    selected.value = node.value
+    selectedPerms.fetch({
+      entity_name: selected.value,
     })
   }
-
-  folderSearch.value = null
 }
-
-const expandNode = (obj, name) => {
-  if (obj.value === name) {
-    return obj
-  }
-
-  for (let k of obj.children) {
-    let res = expandNode(k, name)
-    if (res) {
-      obj.isCollapsed = false
-      return res
-    }
-  }
-  return false
-}
-
-watch(folderSearch, (val) => {
-  if (!val) return
-  expandNode(tree.value, val)
-  openEntity(val)
-})
 
 function closeEntity(name) {
   const index = breadcrumbs.value.findIndex((obj) => obj.name === name)
   if (breadcrumbs.value.length > 1 && index !== breadcrumbs.value.length - 1) {
     breadcrumbs.value = breadcrumbs.value.slice(0, index + 1)
-    currentFolder.value = breadcrumbs.value[breadcrumbs.value.length - 1].name
+    selected.value = breadcrumbs.value[breadcrumbs.value.length - 1].name
     folderContents.fetch({
-      entity_name: currentFolder.value,
-      personal: currentFolder.value === "" ? 1 : -1,
+      entity_name: selected.value,
+      personal: selected.value === "" ? 1 : -1,
     })
   }
 }
@@ -466,8 +481,8 @@ const moveFile = async () => {
   emit("success")
   await move.submit({
     entity_names: props.entities.map((obj) => obj.name),
-    new_parent: currentFolder.value,
-    is_private: breadcrumbs.value[breadcrumbs.value.length - 1].is_private,
+    new_parent: selected.value,
+    team: chosenTeam.value,
   })
   emit("complete")
 }

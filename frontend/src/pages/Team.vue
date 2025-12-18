@@ -1,12 +1,15 @@
 <template>
   <GenericPage
-    :get-entities="getHome"
+    :get-entities="getTeam"
     :icon="LucideBuilding2"
-    primary-message="Team is empty"
-    secondary-message="Add files by dropping them here."
+    :empty="{
+      title: 'This team is empty',
+      description: 'Add files by dropping them here.',
+    }"
     :verify="{
       data: {
         write,
+        upload: write,
       },
     }"
   />
@@ -14,12 +17,12 @@
 
 <script setup>
 import GenericPage from "@/components/GenericPage.vue"
-import { getHome, getTeams } from "@/resources/files"
+import { getTeam, getTeams } from "@/resources/files"
 import { allUsers } from "@/resources/permissions"
 import { useStore } from "vuex"
 import { useRoute } from "vue-router"
 import LucideBuilding2 from "~icons/lucide/building-2"
-import { computed } from "vue"
+import { computed, watch } from "vue"
 
 const store = useStore()
 const props = defineProps({
@@ -32,11 +35,18 @@ const write = computed(
     allUsers.data &&
     allUsers.data.find((k) => k.name === store.state.user.id)?.access_level > 0
 )
-if (getTeams.data)
-  store.commit("setBreadcrumbs", [
-    {
-      label: getTeams.data[useRoute().params.team]?.title,
-      name: "Team",
-    },
-  ])
+const route = useRoute()
+const teamData = computed(() => getTeams.data?.[route.params?.team])
+watch(
+  teamData,
+  (t) =>
+    t &&
+    store.commit("setBreadcrumbs", [
+      {
+        label: t.title,
+        name: t.name,
+      },
+    ]),
+  { immediate: true }
+)
 </script>

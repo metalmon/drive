@@ -5,14 +5,14 @@
   >
     <template #body-title>
       <h3
-        class="text-2xl font-semibold leading-6 text-ink-gray-9 cursor-pointer"
+        class="text-2xl font-semibold leading-6 text-ink-gray-9 cursor-pointer pr-2"
         @click="emitter.emit('rename')"
       >
         {{ entity.title }}
       </h3>
     </template>
     <template #body-content>
-      <ul class="space-y-3 text-sm mb-4 text-ink-gray-9">
+      <ul class="space-y-3 text-sm mb-4 text-ink-gray-8">
         <span class="text-base font-semibold">Information</span>
         <li>
           <span class="inline-block w-24 text-ink-gray-5"
@@ -48,11 +48,20 @@
           >
           <span class="col-span-1">{{ formatDate(entity.creation) }}</span>
         </li>
+        <li class="flex items-center">
+          <span class="inline-block w-24 text-ink-gray-5"
+            >{{ __("Tags") }}:</span
+          >
+          <TagInput
+            class="flex-grow"
+            :entity
+          />
+        </li>
       </ul>
 
       <ul
         v-if="editor?.storage?.characterCount"
-        class="space-y-3 text-sm mb-4 text-ink-gray-9"
+        class="space-y-3 text-sm mb-4 text-ink-gray-8"
       >
         <span class="text-base font-semibold">{{ __("Stats") }}</span>
         <li>
@@ -85,8 +94,8 @@
           </span>
         </li>
       </ul>
-      <div class="flex justify-between">
-        <span class="text-base font-semibold">Access</span>
+      <div class="flex justify-between items-center">
+        <span class="text-base font-semibold text-ink-gray-8">Access</span>
         <Button
           v-if="entity.share"
           :variant="'subtle'"
@@ -103,7 +112,7 @@
       />
       <ul
         v-else
-        class="space-y-3 text-sm py-2 mb-4"
+        class="space-y-3 text-sm py-2"
       >
         <li class="flex">
           <span class="inline-block w-24 text-ink-gray-5"
@@ -114,7 +123,7 @@
               size="sm"
               :access-type="getGeneralAccess.data.type"
               :show-text="true"
-              class="-mr-[3px] outline outline-white"
+              class="-mr-[3px]"
             />
           </div>
         </li>
@@ -124,7 +133,7 @@
           >
           <span
             v-if="userAccess.data?.length"
-            class="col-span-1"
+            class="col-span-1 text-ink-gray-8"
           >
             {{
               userAccess.data.length +
@@ -141,8 +150,8 @@
         </li>
       </ul>
       <ul
-        class="space-y-3 text-sm text-ink-gray-9"
         v-if="developer"
+        class="space-y-3 text-sm text-ink-gray-8 mb-4 mt-4"
       >
         <div>
           <span class="text-base font-semibold">{{ __("Developer") }}</span>
@@ -150,7 +159,6 @@
             variant="subtle"
             size="sm"
             class="scale-[90%] float-right"
-            @click=""
           >
             <a
               :href="'/app/drive-file/' + entity.name"
@@ -160,12 +168,16 @@
           </Button>
         </div>
         <li>
+          <span class="inline-block w-24">ID:</span>
+          <span class="col-span-1">{{ entity.name }}</span>
+        </li>
+        <li>
           <span class="inline-block w-24">Disk path:</span>
           <span class="col-span-1">{{ entity.path }}</span>
         </li>
         <li>
-          <span class="inline-block w-24">Private:</span>
-          <span class="col-span-1">{{ entity.is_private }}</span>
+          <span class="inline-block w-24">Team:</span>
+          <span class="col-span-1">{{ entity.team }}</span>
         </li>
         <li>
           <span class="inline-block w-24">MIME type:</span>
@@ -179,6 +191,7 @@
 <script setup>
 import { formatDate } from "@/utils/format"
 import { Dialog, Button, LoadingIndicator, createResource } from "frappe-ui"
+import TagInput from "@/components/TagInput.vue"
 import { ref, inject } from "vue"
 import { onKeyDown } from "@vueuse/core"
 import emitter from "@/emitter"
@@ -201,18 +214,13 @@ const getGeneralAccess = createResource({
   transform: (data) => {
     if (!data || !data.read) {
       if (getGeneralAccess.params.user === "Guest")
-        getGeneralAccess.fetch({ user: "$TEAM" })
+        getGeneralAccess.fetch({ team: 1 })
       else
         return {
           type: "restricted",
         }
-    } else {
-      const translate = {
-        Guest: "public",
-        $TEAM: "team",
-      }
-      return { ...data, type: translate[getGeneralAccess.params.user] }
     }
+    return { ...data, type: getGeneralAccess.params.team ? "team" : "public" }
   },
 })
 getGeneralAccess.fetch({ user: "Guest" })

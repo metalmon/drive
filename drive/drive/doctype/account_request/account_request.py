@@ -28,28 +28,6 @@ class AccountRequest(Document):
     def validate(self):
         self.email = self.email.strip()
 
-    def after_insert(self):
-        if not self.invite:
-            self.set_otp()
-            self.send_otp()
-        # Telemetry: Only capture if it's not a saas signup or invited by parent team. Also don't capture if user already have a team
-        # if not (
-        #     frappe.db.exists("Team", {"user": self.email})
-        #     or self.is_saas_signup()
-        #     or self.invited_by_parent_team
-        # ):
-        #     # Telemetry: Account Request Created
-        #     capture("account_request_created", "fc_signup", self.email)
-
-        # if self.is_saas_signup() and self.is_using_new_saas_flow():
-        #     # Telemetry: Account Request Created
-        #     capture("account_request_created", "fc_saas", self.email)
-
-        # if self.is_saas_signup() and not self.is_using_new_saas_flow():
-        #     # If user used oauth, we don't need to verification email but to track the event in stat, send this dummy event
-        #     capture("verification_email_sent", "fc_signup", self.email)
-        #     capture("clicked_verify_link", "fc_signup", self.email)
-
     def set_otp(self):
         self.otp = generate_otp()
         self.otp_generated_at = frappe.utils.now_datetime()
@@ -81,13 +59,9 @@ class AccountRequest(Document):
 
     def get_verification_url(self):
         if self.saas:
-            return get_url(
-                f"/api/method/press.api.saas.validate_account_request?key={self.request_key}"
-            )
+            return get_url(f"/api/method/press.api.saas.validate_account_request?key={self.request_key}")
         if self.product_trial:
-            return get_url(
-                f"/dashboard/saas/{self.product_trial}/oauth?key={self.request_key}&email={self.email}"
-            )
+            return get_url(f"/dashboard/saas/{self.product_trial}/oauth?key={self.request_key}&email={self.email}")
         return get_url(f"/dashboard/setup-account/{self.request_key}")
 
     @property

@@ -3,49 +3,48 @@ import store from "@/store"
 import { formatSize } from "@/utils/format"
 import { nextTick } from "vue"
 import { useTimeAgo } from "@vueuse/core"
-import { mutate, getRecents } from "@/resources/files"
+import {
+  getRecents,
+  mutate,
+  createDocument,
+  createPresentation,
+  getDocuments,
+} from "@/resources/files"
 import { getTeams } from "@/resources/files"
 import { set } from "idb-keyval"
-import editorStyle from "@/components/DocEditor/editor.css?inline"
+import editorStyle from "@/components/DocEditor/styles/editor.css?inline"
 import globalStyle from "@/index.css?inline"
 import slugify from "slugify"
 import { toast } from "@/utils/toasts.js"
 import { useFileUpload, toast as nToast } from "frappe-ui"
 import emitter from "@/emitter"
+import { createLowlight, common } from "lowlight"
+import { toHtml } from "hast-util-to-html"
 
-// MIME icons
-import Folder from "@/components/MimeIcons/Folder.vue"
-import Archive from "@/components/MimeIcons/Archive.vue"
-import Document from "@/components/MimeIcons/Document.vue"
-import Spreadsheet from "@/components/MimeIcons/Spreadsheet.vue"
-import Presentation from "@/components/MimeIcons/Presentation.vue"
-import Audio from "@/components/MimeIcons/Audio.vue"
-import Image from "@/components/MimeIcons/Image.vue"
-import Video from "@/components/MimeIcons/Video.vue"
-import PDF from "@/components/MimeIcons/PDF.vue"
-import Unknown from "@/components/MimeIcons/Unknown.vue"
-
-export const openEntity = (team = null, entity, new_tab = false) => {
-  store.commit("setActiveEntity", entity)
-  if (!team) team = entity.team
+export const openEntity = (entity, new_tab = false) => {
   if (!entity.is_group) {
     if (!getRecents.data?.some?.((k) => k.name === entity.name))
       getRecents.setData((data) => [...(data || []), entity])
+
     mutate([entity], (e) => {
       e.accessed = Date()
       entity.relativeAccessed = useTimeAgo(entity.accessed)
     })
   }
+
   if (new_tab) {
     return window.open(getLink(entity, false), "_blank")
   }
 
-  store.state.breadcrumbs.push({
-    label: entity.title,
-    name: entity.name,
-    route: null,
-  })
+  if (!entity.breadcrumbs?.length)
+    store.state.breadcrumbs.push({
+      label: entity.title,
+      name: entity.name,
+      route: null,
+    })
+  else setBreadCrumbs(entity)
 
+  // hm?
   if (entity.name === "") {
     router.push({
       name: entity.is_private ? "Home" : "Team",
@@ -54,22 +53,30 @@ export const openEntity = (team = null, entity, new_tab = false) => {
   } else if (entity.is_group) {
     router.push({
       name: "Folder",
-      params: { team, entityName: entity.name },
+      params: { entityName: entity.name },
     })
   } else if (entity.is_link) {
     const origin = new URL(entity.path).origin
-    confirm(
-      `This will open an external link to ${origin} - are you sure you want to open?`
-    ) && window.open(entity.path, "_blank")
-  } else if (entity.mime_type === "frappe_doc") {
+    if (
+      confirm(
+        `This will open an external link to ${origin} - are you sure you want to open?`
+      )
+    )
+      window.open(entity.path, "_blank")
+  } else if (entity.mime_type === "frappe/slides") {
+    window.open("/slides/presentation/" + entity.path, "_blank")
+  } else if (
+    entity.mime_type === "frappe_doc" ||
+    entity.mime_type === "text/markdown"
+  ) {
     router.push({
       name: "Document",
-      params: { team, entityName: entity.name },
+      params: { entityName: entity.name },
     })
   } else {
     router.push({
       name: "File",
-      params: { team, entityName: entity.name },
+      params: { entityName: entity.name },
     })
   }
 }
@@ -87,8 +94,6 @@ function trimCommonPrefix(a, b) {
 function extractNum(name) {
   const match = name.match(/^(.*?)(\d+)(\D*)$/)
   if (!match) return 0
-
-  const [_, prefix, numStr] = match
   return parseInt(match[2], 10)
 }
 const months = {
@@ -170,17 +175,6 @@ export const sortEntities = (rows, order) => {
   return rows
 }
 
-export const manageBreadcrumbs = (to) => {
-  store.dispatch("clearUploads")
-  if (
-    store.state.breadcrumbs[store.state.breadcrumbs.length - 1]?.name !==
-    to.params.entityName
-  ) {
-    store.state.breadcrumbs.splice(1)
-    store.state.breadcrumbs.push({ loading: true })
-  }
-}
-
 export const groupByFolder = (entities) => {
   return {
     Folders: entities.filter((x) => x.is_group === 1),
@@ -196,46 +190,45 @@ export const prettyData = (entities) => {
     return entity
   })
 }
-export const setBreadCrumbs = (
-  breadcrumbs,
-  is_private,
-  final_func = () => {}
-) => {
-  const route = router.currentRoute.value
-  let res = [
-    {
-      label: __("Shared"),
-      name: "Shared",
-      route: store.getters.isLoggedIn && "/shared",
-    },
-  ]
-  const lastEl = breadcrumbs[breadcrumbs.length - 1]
-  const partOfTeam =
-    getTeams.data && Object.keys(getTeams.data).includes(lastEl.team)
-  if (
-    (partOfTeam && !lastEl.is_private) ||
-    lastEl.owner == store.state.user.id
-  ) {
+export const setBreadCrumbs = (entity) => {
+  const breadcrumbs = entity.breadcrumbs
+  const in_home = entity.in_home
+  let res = store.getters.isLoggedIn
+    ? [
+        {
+          label: __("Shared"),
+          name: "Shared",
+          route: "/shared",
+        },
+      ]
+    : []
+  const team = getTeams.data?.[breadcrumbs[0].team]
+  if (team || in_home)
     res = [
       {
-        label: is_private
-          ? __("Home")
-          : getTeams.data[breadcrumbs[0].team].title,
-        name: is_private ? "Home" : "Team",
-        route: `/t/${route.params.team}` + (is_private ? "/" : "/team"),
+        label: in_home ? __("Home") : team.title,
+        name: in_home ? "Home" : team.name,
+        route: in_home
+          ? { name: "Home" }
+          : { name: "Team", params: { team: team.name } },
       },
     ]
-  }
+
   if (!breadcrumbs[0].parent_entity) breadcrumbs.splice(0, 1)
   const popBreadcrumbs = (item) => () =>
     res.splice(res.findIndex((k) => k.name === item.name) + 1)
-  breadcrumbs.forEach((item, idx) => {
+
+  breadcrumbs.forEach((folder, idx) => {
     const final = idx === breadcrumbs.length - 1
     res.push({
-      label: item.title,
-      name: item.name,
-      onClick: final ? final_func : popBreadcrumbs(item),
-      route: final ? null : `/t/${item.team}/folder/` + item.name,
+      label: folder.title,
+      name: folder.name,
+      onClick: final
+        ? () => entity.write && emitter.emit("rename")
+        : popBreadcrumbs(folder),
+      route: final
+        ? null
+        : { name: "Folder", params: { entityName: folder.name } },
     })
   })
   store.commit("setBreadcrumbs", res)
@@ -332,19 +325,6 @@ export const MIME_LIST_MAP = {
   ],
 }
 
-export const ICON_TYPES = {
-  Folder: Folder,
-  Image: Image,
-  Audio: Audio,
-  Video: Video,
-  PDF: PDF,
-  Document: Document,
-  Spreadsheet: Spreadsheet,
-  Archive: Archive,
-  Presentation: Presentation,
-  Unknown: Unknown,
-}
-
 // Synced cache - ensure all setters are reflected in the app
 function getCacheKey(cacheKey) {
   if (!cacheKey) {
@@ -382,17 +362,53 @@ export function enterFullScreen() {
   }
 }
 
-export function printDoc(html) {
+function highlightCodeBlocks(html) {
+  const lowlight = createLowlight(common)
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  doc.querySelectorAll("pre code").forEach((block) => {
+    const result = lowlight.highlightAuto(block.textContent)
+    block.innerHTML = toHtml(result)
+  })
+
+  return doc.body.innerHTML
+}
+
+export function printDoc(html, settings = {}) {
+  const highlightedHtml = highlightCodeBlocks(html)
+  const fontMap = {
+    caveat: "var(--font-caveat)",
+    "comic-sans": "var(--font-comic-sans)",
+    comfortaa: "var(--font-comfortaa)",
+    "eb-garamond": "var(--font-eb-garamond)",
+    fantasy: "fantasy",
+    geist: "var(--font-geist)",
+    "ibm-plex": "var(--font-ibm-plex)",
+    inter: "var(--font-inter)",
+    jetbrains: "var(--font-jetbrains)",
+    lora: "var(--font-lora)",
+    merriweather: "var(--font-merriweather)",
+    nunito: "var(--font-nunito)",
+  }
+  const fontFamily = fontMap[settings?.font_family]
+  const fontSize = settings?.font_size
+  const lineHeight = settings?.line_height
   const content = `
             <!DOCTYPE html>
             <html>
               <head>
-                <style>${globalStyle}</style>
-                <style>${editorStyle}</style>
+              <style>${globalStyle}</style>
+              <style>${editorStyle}</style>
+              <style>
+                .ProseMirror {
+                  font-family: ${fontFamily} !important;
+                  font-size: ${fontSize}px;
+                  line-height: ${lineHeight}px;
+                }
+              </style>
               </head>
               <body>
-                <div class="Prosemirror prose-sm" style='padding-left: 40px; padding-right: 40px; padding-top: 20px; padding-bottom: 20px; margin: 0;'>
-                  ${html}
+                <div class="ProseMirror prose-sm" style='padding-left: 40px; padding-right: 40px; padding-top: 20px; padding-bottom: 20px; margin: 0;'>
+                  ${highlightedHtml}
                 </div>
               </body>
             </html>
@@ -425,7 +441,7 @@ export function printDoc(html) {
             if (!frameWindow.document.execCommand("print", false)) {
               frameWindow.print()
             }
-          } catch (e) {
+          } catch {
             frameWindow.print()
           }
           frameWindow.close()
@@ -442,15 +458,20 @@ export function printDoc(html) {
 }
 
 function slugger(title) {
-  return slugify(title.split(".").join(" "), { lower: true })
+  return slugify(title.split(".").join(" "), {
+    lower: true,
+    trim: true,
+    remove: /[^\w\s\']|_/,
+  })
 }
 
 function getLinkStem(entity) {
   return `${
     {
-      true: "file",
-      [new Boolean(entity.is_group)]: "folder",
-      [new Boolean(entity.document)]: "document",
+      true: "f",
+      [new Boolean(entity.is_group)]: "d",
+      [new Boolean(entity.document || entity.mime_type === "text/markdown")]:
+        "w",
     }[true]
   }/${entity.name}/${slugger(entity.title)}`
 }
@@ -471,25 +492,27 @@ const copyToClipboard = (str) => {
 }
 
 export async function updateURLSlug(title) {
-  await nextTick()
   const route = router.currentRoute.value
+  await nextTick()
   const slug = slugger(title)
   if (route.params.slug !== slug) {
     // Hacky, but we only want to update the URL - triggering a reload breaks a lot
-    const new_path =
-      window.location.pathname.split("/").slice(0, 6).join("/") + "/" + slug
+    const base = window.location.pathname.split("/").slice(0, 4).join("/")
+    const new_path = base + (base.endsWith("/") ? "" : "/") + slug
     history.replaceState({}, null, new_path)
   }
 }
 
 export function getLink(entity, copy = true, withDomain = true) {
-  const team = router.currentRoute.value.params.team
-  let link = entity.is_link
-    ? entity.path
-    : `${
-        withDomain ? window.location.origin + "/drive" : ""
-      }/t/${team}/${getLinkStem(entity)}`
-
+  let link
+  if (entity.is_link) link = entity.path
+  else if (entity.mime_type === "frappe/slides") {
+    link = window.location.origin + "/slides/presentation/" + entity.name
+  } else {
+    link = `${
+      withDomain ? window.location.origin + "/drive" : ""
+    }/${getLinkStem(entity)}`
+  }
   if (!copy) return link
   try {
     copyToClipboard(link).then(() => toast("Copied to your clipboard!"))
@@ -537,8 +560,8 @@ export const pasteObj = (e) => {
     const file = clipboardItems
       .find((item) => item.type.includes("image"))
       ?.getAsFile()
-    if (file) {
-      const route = router.currentRoute.value
+    const route = router.currentRoute.value
+    if (file && ["Home", "Folder", "Team"].includes(route.name)) {
       const entity = uploadImage(file, {
         team: route.params.team,
         parent: route.params.entityName || "",
@@ -680,3 +703,47 @@ export const FONT_FAMILIES = [
       }),
   },
 ]
+
+export function getRandomColor() {
+  const letters = "0123456789ABCDEF"
+  let color = "#"
+  for (let i = 0; i < 6; i++) {
+    color += letters[Math.floor(Math.random() * 10)]
+  }
+  return color
+}
+export const newExternal = async (type) => {
+  const route = router.currentRoute.value
+  const data = await (type === "Document"
+    ? createDocument
+    : createPresentation
+  ).submit({
+    team: route.params.team,
+    parent: store.state.currentFolder.name,
+  })
+  prettyData([data])
+  data.file_type = type
+  store.state.listResource.data?.push?.(data)
+  getDocuments.data?.push?.(data)
+  if (type === "Document") {
+    router.push({
+      name: "Document",
+      params: { entityName: data.name },
+    })
+  } else if (type === "Presentation") {
+    window.location.replace("/slides/presentation/" + data.path)
+  }
+}
+
+function isApple() {
+  // Pattern borrowed from TinyKeys library.
+  // --
+  // https://github.com/jamiebuilds/tinykeys/blob/e0d23b4f248af59ffbbe52411505c3d681c73045/src/tinykeys.ts#L50-L54
+  var macOsPattern = /Mac|iPod|iPhone|iPad/
+
+  return macOsPattern.test(window.navigator.platform)
+}
+
+export function isModKey(e) {
+  return isApple() ? e.metaKey : e.ctrlKey
+}

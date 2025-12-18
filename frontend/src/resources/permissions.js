@@ -1,5 +1,6 @@
 import { createResource } from "frappe-ui"
 import { toast } from "@/utils/toasts"
+import store from "@/store"
 
 export const getUsersWithAccess = createResource({
   url: "drive.api.permissions.get_shared_with_list",
@@ -57,10 +58,6 @@ export const getInvites = createResource({
 
 export const acceptInvite = createResource({
   url: "drive.api.product.accept_invite",
-  onSuccess: (data) => {
-    if (data) window.location.replace(data)
-    else toast("Added to the team")
-  },
 })
 
 export const rejectInvite = createResource({
@@ -70,4 +67,49 @@ export const rejectInvite = createResource({
 
 export const isAdmin = createResource({
   url: "drive.api.product.check_is_admin",
+})
+
+export const apps = createResource({
+  url: "frappe.apps.get_apps",
+  cache: "apps",
+  transform: (data) => {
+    let apps = [
+      {
+        name: "frappe",
+        logo: "/assets/frappe/images/framework.png",
+        title: "Desk",
+        route: "/app",
+      },
+    ]
+    data.map((app) => {
+      if (app.name === "drive") return
+      apps.push({
+        name: app.name,
+        logo: app.logo,
+        title: app.title,
+        route: app.route,
+      })
+    })
+
+    return apps
+  },
+})
+
+export const diskSettings = createResource({
+  url: "drive.api.product.disk_settings",
+  method: "GET",
+  cache: "disk-settings",
+})
+
+export const createTeam = createResource({
+  url: "drive.api.product.create_team",
+  makeParams: (params) => ({
+    ...params,
+    user: store.state.user.id,
+  }),
+})
+
+export const getDiskSettings = createResource({
+  url: "drive.api.product.disk_settings",
+  method: "GET",
 })

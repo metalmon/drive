@@ -30,7 +30,7 @@ add_to_apps_screen = [
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/drive/css/drive.css"
-# app_include_js = "/assets/drive/js/ff_integration.js"
+app_include_js = "ff_integration.bundle.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/drive/css/drive.css"
@@ -95,15 +95,9 @@ after_install = "drive.install.after_install"
 # See frappe.core.notifications.get_notification_config
 
 # notification_config = "drive.notifications.get_notification_config"
-
 # Permissions
 # -----------
 # Permissions evaluated in scripted ways
-
-# permission_query_conditions = {
-# 	"Event": "frappe.desk.doctype.event.event.get_permission_query_conditions",
-# }
-#
 
 permission_query_conditions = {
     "Drive Team": "drive.utils.overrides.filter_drive_team",
@@ -116,6 +110,10 @@ permission_query_conditions = {
     "Drive Notification": "drive.utils.overrides.filter_drive_notif",
 }
 
+has_permission = {
+    "Drive File": "drive.api.permissions.user_has_permission",
+    "Drive Document": "drive.api.permissions.user_has_permission_doc",
+}
 # DocType Class
 # ---------------
 # Override standard doctype classes
@@ -128,13 +126,12 @@ permission_query_conditions = {
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+    "Presentation": {
+        "on_update": "drive.api.integration.presentation",
+        "on_trash": "drive.api.integration.presentation",
+    }
+}
 
 
 # fixtures = [{"dt": "Role", "filters": [["role_name", "like", "Drive %"]]}]
@@ -144,9 +141,10 @@ permission_query_conditions = {
 
 scheduler_events = {
     "daily": ["drive.api.files.auto_delete_from_trash", "drive.api.files.clear_deleted_files"],
-    "hourly": ["drive.api.permissions.auto_delete_expired_perms"],
+    "hourly": ["drive.api.permissions.auto_delete_expired_perms", "drive.api.files.auto_delete_transfers"],
 }
 
+after_request = "drive.api.product.after_request"
 # Testing
 # -------
 

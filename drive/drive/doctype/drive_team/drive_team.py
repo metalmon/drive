@@ -20,6 +20,7 @@ class DriveTeam(Document):
                 "name": self.name,
                 "doctype": "Drive File",
                 "title": f"Drive - {self.name}",
+                "path": "",
                 "is_group": 1,
                 "team": self.name,
             }
@@ -30,18 +31,20 @@ class DriveTeam(Document):
         self.save()
 
         settings = frappe.get_single("Drive Disk Settings")
-        root_folder = {
-            settings.root_prefix_type == "team_id": d.name,
-            settings.root_prefix_type == "team_name": self.title,
-            settings.root_prefix_type
-            == "other": settings.root_prefix_value if settings.root_prefix_value != "/" else "",
-        }[True]
-        d.path = root_folder
+        root_folder: str
+        if self.s3_bucket:
+            root_folder = self.prefix or ""
+        else:
+            root_folder = (
+                Path(settings.root_folder)
+                / {
+                    settings.team_prefix == "team_id": self.name + "/",
+                    settings.team_prefix == "team_name": f"{self.title} ({frappe.session.user})/",
+                    settings.team_prefix == "none": "",
+                }[True]
+            )
+        d.path = str(root_folder)
         d.save()
-
-        # Set to default team if this is the first team created
-        if len(get_teams()) == 1:
-            set_settings({"default_team": self.name})
 
         # Create even with S3 as we need local folders before uploading to S3
         user_directory_path = Path(frappe.get_site_path("private/files")) / root_folder
@@ -50,14 +53,9 @@ class DriveTeam(Document):
         (user_directory_path / settings.thumbnail_prefix).mkdir(exist_ok=True)
         if settings.flat:
             (user_directory_path / "embeds").mkdir(exist_ok=True)
-        else:
-            (user_directory_path / settings.team_prefix).mkdir(exist_ok=True)
-            (user_directory_path / settings.personal_prefix).mkdir(exist_ok=True)
 
     def on_trash(self):
-        user_settings = frappe.get_list(
-            "Drive Settings", {"default_team": self.name}, pluck=["name"]
-        )
+        user_settings = frappe.get_list("Drive Settings", {"default_team": self.name}, pluck=["name"])
         for s in user_settings:
             d = frappe.get_doc("Drive Settings", s)
             d.default_team = ""

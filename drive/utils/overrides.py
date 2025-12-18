@@ -6,7 +6,7 @@ from drive.api.permissions import get_teams
 def common_filters(func):
     def decorator(user):
         user = user or frappe.session.user
-        if user == "Administrator":
+        if user == "Administrator" or "Drive Admin" in frappe.get_roles():
             return ""
         return func(frappe.db.escape(user))
 
@@ -56,6 +56,4 @@ def filter_drive_recent(user):
 
 @common_filters
 def filter_drive_notif(user):
-    return (
-        f"(`tabDrive Notification`.to_user = {user} or `tabDrive Notification`.from_user = {user})"
-    )
+    return f"(`tabDrive Notification`.to_user = {user} or `tabDrive Notification`.from_user = {user})"
