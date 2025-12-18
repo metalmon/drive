@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Frappe Drive VERSION\n"
 "Report-Msgid-Bugs-To: developers@frappe.io\n"
-"POT-Creation-Date: 2025-12-12 16:11+0000\n"
-"PO-Revision-Date: 2025-12-12 16:11+0000\n"
+"POT-Creation-Date: 2025-12-18 17:41+0000\n"
+"PO-Revision-Date: 2025-12-18 17:41+0000\n"
 "Last-Translator: developers@frappe.io\n"
 "Language-Team: developers@frappe.io\n"
 "MIME-Version: 1.0\n"
@@ -62,6 +62,10 @@ msgstr ""
 msgid "Action Type"
 msgstr ""
 
+#: frontend/src/components/InfoSidebar.vue:197
+msgid "Activity"
+msgstr ""
+
 #: frontend/src/components/Settings/UserListSettings.vue:456
 #: frontend/src/components/TagInput.vue:25
 msgid "Add"
@@ -95,6 +99,10 @@ msgstr ""
 #. Label of the allow_download (Check) field in DocType 'Drive File'
 #: drive/drive/doctype/drive_file/drive_file.json
 msgid "Allow Download"
+msgstr ""
+
+#: drive/hooks.py:8
+msgid "An easy to use, document sharing and management solution."
 msgstr ""
 
 #: frontend/src/components/Sidebar.vue:125
@@ -154,6 +162,7 @@ msgstr ""
 #. Label of the comments (Table) field in DocType 'Drive File'
 #: drive/drive/doctype/drive_document/drive_document.json
 #: drive/drive/doctype/drive_file/drive_file.json
+#: frontend/src/components/InfoSidebar.vue:131
 msgid "Comments"
 msgstr ""
 
@@ -238,6 +247,7 @@ msgstr ""
 
 #. Name of a Workspace
 #: drive/config/desktop.py:11 drive/drive/workspace/drive/drive.json
+#: drive/hooks.py:22
 msgid "Drive"
 msgstr ""
 
@@ -436,6 +446,14 @@ msgstr ""
 msgid "First Name"
 msgstr ""
 
+#: drive/hooks.py:6
+msgid "Frappe Drive"
+msgstr ""
+
+#: drive/hooks.py:7
+msgid "Frappe Technologies Pvt. Ltd."
+msgstr ""
+
 #. Label of the from_user (Link) field in DocType 'Drive Notification'
 #: drive/drive/doctype/drive_notification/drive_notification.json
 msgid "From User"
@@ -487,6 +505,10 @@ msgstr ""
 
 #: frontend/src/components/Sidebar.vue:212
 msgid "Inbox"
+msgstr ""
+
+#: frontend/src/components/InfoSidebar.vue:15
+msgid "Information"
 msgstr ""
 
 #. Label of the invite (Link) field in DocType 'Account Request'
@@ -574,6 +596,7 @@ msgid "MIME Type"
 msgstr ""
 
 #: frontend/src/components/InfoPopup.vue:106
+#: frontend/src/components/InfoSidebar.vue:64
 #: frontend/src/components/Sidebar.vue:120
 msgid "Manage"
 msgstr ""
@@ -614,6 +637,7 @@ msgstr ""
 #: drive/drive/doctype/drive_file/drive_file.json
 #: frontend/src/components/DriveToolBar.vue:251
 #: frontend/src/components/InfoPopup.vue:41
+#: frontend/src/components/InfoSidebar.vue:103
 msgid "Modified"
 msgstr ""
 
@@ -649,6 +673,7 @@ msgstr ""
 msgid "No tags"
 msgstr ""
 
+#: drive/public/dist/js/ff_integration.bundle.2GQ2KTWX.js:8259
 #: drive/public/js/ff_integration.bundle.js:29
 msgid "No teams available"
 msgstr ""
@@ -698,6 +723,7 @@ msgstr ""
 
 #: frontend/src/components/DriveToolBar.vue:247
 #: frontend/src/components/InfoPopup.vue:19
+#: frontend/src/components/InfoSidebar.vue:114
 #: frontend/src/components/ListView.vue:150
 msgid "Owner"
 msgstr ""
@@ -748,6 +774,10 @@ msgstr ""
 
 #: frontend/src/components/Settings/ProfileSettings.vue:3
 msgid "Profile"
+msgstr ""
+
+#: frontend/src/components/InfoSidebar.vue:79
+msgid "Properties"
 msgstr ""
 
 #. Option for the 'Status' (Select) field in DocType 'Drive User Invitation'
@@ -880,6 +910,7 @@ msgstr ""
 
 #: frontend/src/components/DriveToolBar.vue:255
 #: frontend/src/components/InfoPopup.vue:33
+#: frontend/src/components/InfoSidebar.vue:93
 #: frontend/src/components/ListView.vue:186
 msgid "Size"
 msgstr ""
@@ -945,6 +976,7 @@ msgstr ""
 #. Label of the tags (Table) field in DocType 'Drive File'
 #: drive/drive/doctype/drive_file/drive_file.json
 #: frontend/src/components/InfoPopup.vue:53
+#: frontend/src/components/InfoSidebar.vue:70
 #: frontend/src/components/Settings/TagSettings.vue:4
 msgid "Tags"
 msgstr ""
@@ -1011,6 +1043,7 @@ msgstr ""
 #: drive/drive/doctype/drive_notification/drive_notification.json
 #: frontend/src/components/DriveToolBar.vue:259
 #: frontend/src/components/InfoPopup.vue:27
+#: frontend/src/components/InfoSidebar.vue:82
 msgid "Type"
 msgstr ""
 
@@ -1032,6 +1065,10 @@ msgstr ""
 #. Label of the upload (Check) field in DocType 'Drive Permission'
 #: drive/drive/doctype/drive_permission/drive_permission.json
 msgid "Upload"
+msgstr ""
+
+#: frontend/src/components/InfoSidebar.vue:109
+msgid "Uploaded"
 msgstr ""
 
 #. Description of the 'Preview size' (Int) field in DocType 'Drive Disk
@@ -1086,6 +1123,7 @@ msgstr ""
 #. Label of the writer_section (Section Break) field in DocType 'Drive
 #. Settings'
 #: drive/drive/doctype/drive_settings/drive_settings.json
+#: frontend/src/components/Settings/WriterSettings.vue:4
 msgid "Writer"
 msgstr ""
 
